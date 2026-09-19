@@ -17,11 +17,14 @@ type ExtractionFailureClass = Literal[
 
 TRANSPORT_ERROR_NAMES = frozenset(
     {
+        "CertificateVerifyError",
         "ChunkedEncodingError",
         "ConnectError",
         "ConnectTimeout",
         "ConnectionError",
         "ConnectionResetError",
+        "DNSError",
+        "IncompleteRead",
         "NetworkError",
         "NameResolutionError",
         "NewConnectionError",
@@ -50,6 +53,15 @@ RESPONSE_CONTRACT_ERROR_NAMES = frozenset(
         "UnexpectedListResult",
         "UnexpectedNonListResult",
         "UnexpectedResultShape",
+    }
+)
+TRANSPORT_CURL_CODE_NAMES = frozenset(
+    {
+        "BAD_CONTENT_ENCODING",
+        "HTTP2",
+        "HTTP2_STREAM",
+        "HTTP3",
+        "PARTIAL_FILE",
     }
 )
 SAFE_ROOT_ERROR_NAMES = frozenset(
@@ -144,6 +156,22 @@ def http_status_code(exc: BaseException) -> int | None:
     return None
 
 
+def is_curl_transport_protocol_error(exc: BaseException) -> bool:
+    """Report whether any linked exception carries a transport-layer libcurl code.
+
+    ``curl_cffi`` maps HTTP/2 and HTTP/3 framing faults, truncated bodies, and
+    undecodable transfer encodings onto generic classes such as ``HTTPError``
+    whose names otherwise denote application-level status failures. The libcurl
+    code is the unambiguous signal for those transport faults.
+    """
+
+    for candidate in exception_chain(exc):
+        name = getattr(getattr(candidate, "code", None), "name", None)
+        if isinstance(name, str) and name in TRANSPORT_CURL_CODE_NAMES:
+            return True
+    return False
+
+
 def classify_error_name(
     error_name: str,
     *,
@@ -168,6 +196,8 @@ def classify_error_name(
 def classify_exception(exc: BaseException) -> ExtractionFailureClass:
     if any(isinstance(item, ParserInputCaptureIntegrityError) for item in exception_chain(exc)):
         return "runner_infrastructure"
+    if is_curl_transport_protocol_error(exc):
+        return "transport_transient"
     status = http_status_code(exc)
     root_name = root_error_type(exc)
     root_class = classify_error_name(root_name, status_code=status)

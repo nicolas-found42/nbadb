@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+from curl_cffi.const import CurlECode
+from curl_cffi.requests.exceptions import code2error
+
 from nbadb.core.errors import (
     ExtractionError,
     ParserInputCaptureIntegrityError,
@@ -64,6 +67,19 @@ def test_http_429_and_5xx_are_transport_failures() -> None:
     assert classify_error_name("HTTPError", status_code=429) == "transport_transient"
     assert classify_exception(_HttpError("do not persist")) == "transport_transient"
     assert http_status_code(_HttpError()) == 503
+
+
+def test_curl_protocol_faults_are_transport_failures_despite_generic_class_names() -> None:
+    for code in (
+        CurlECode.HTTP2_STREAM,
+        CurlECode.HTTP3,
+        CurlECode.BAD_CONTENT_ENCODING,
+        CurlECode.PARTIAL_FILE,
+    ):
+        exc = code2error(code, "")("redacted", code)
+
+        assert classify_exception(exc) == "transport_transient"
+        assert safe_root_error_type(exc) != "UnclassifiedError"
 
 
 def test_response_contract_names_cover_parser_arrow_and_result_shapes() -> None:

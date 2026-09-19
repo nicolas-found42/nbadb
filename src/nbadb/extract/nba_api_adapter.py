@@ -2007,16 +2007,30 @@ def _strict_stats_packets(
     for canonical_index, (name, expected_headers) in enumerate(expected):
         provider_index, raw_headers, raw_rows = by_name[name]
         headers = _flatten_headers(raw_headers)
+        permuted = False
         if headers != expected_headers:
-            raise ResponseContractError("provider columns differ from the endpoint contract")
+            # A pure permutation carries the same closed column set under the same
+            # names, so no provider value is added, dropped or made ambiguous.
+            # NBA varies header order by request parameter (commonallplayers swaps
+            # TEAM_CODE/TEAM_SLUG under IsOnlyCurrentSeason=1), and the pinned
+            # contract holds one ordering per endpoint class, so a positional
+            # match cannot express both. Downstream conversion addresses every
+            # column by name, so admit the permutation and canonicalize the frame
+            # rather than demoting a complete response to a lossless fallback.
+            if sorted(headers) != sorted(expected_headers) or len(set(headers)) != len(headers):
+                raise ResponseContractError("provider columns differ from the endpoint contract")
+            permuted = True
         rows = _validated_rows(raw_rows, len(headers))
+        frame = rows_to_polars(headers, rows)
+        if permuted:
+            frame = frame.select(expected_headers)
         packets.append(
             NbaApiResultPacket(
                 name=name,
                 provider_index=provider_index,
                 canonical_index=canonical_index,
                 headers=headers,
-                frame=rows_to_polars(headers, rows),
+                frame=frame,
             )
         )
         result_receipts.append(

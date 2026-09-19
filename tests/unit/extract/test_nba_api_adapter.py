@@ -541,11 +541,6 @@ def test_ambiguous_legacy_result_envelopes_fail_closed(
             0,
         ),
         (
-            {"resultSets": [{"name": "Stats", "headers": ["VALUE", "ID"], "rowSet": [["one", 1]]}]},
-            {"reordered_header"},
-            0,
-        ),
-        (
             {"resultSets": [{"name": "Stats", "headers": ["ID", "ID"], "rowSet": [[1, 2]]}]},
             {"additive_header", "duplicate_header", "removed_header"},
             0,
@@ -597,6 +592,41 @@ def test_successful_stats_shape_drift_uses_lossless_fallback(
     assert set(fallback.reason_codes) == expected_reasons
     assert fallback.frame.schema == LOSSLESS_FALLBACK_SCHEMA
     validate_lossless_fallback_frame(fallback.frame)
+
+
+def test_permuted_headers_are_admitted_without_a_lossless_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pure permutation is not drift: same closed column set, same names.
+
+    NBA varies header order by request parameter -- commonallplayers swaps
+    TEAM_CODE/TEAM_SLUG under IsOnlyCurrentSeason=1 -- while the pinned contract
+    holds one ordering per endpoint class and so cannot express both. Demoting
+    the permutation to a lossless fallback surfaced a complete 582-row response
+    to the discovery canary as zero rows, which CI then misread as a VPN exit-IP
+    block and "fixed" by quarantining servers.
+    """
+    _install_stats_response(
+        monkeypatch,
+        _stats_response(
+            {"resultSets": [{"name": "Stats", "headers": ["VALUE", "ID"], "rowSet": [["one", 1]]}]}
+        ),
+    )
+
+    packets = fetch_stats_packets(
+        _LegacyEndpoint,
+        endpoint_contract=_LEGACY_CONTRACT,
+        item_id=1,
+    )
+
+    assert packets.lossless_fallback is None
+    assert len(packets) == 1
+    packet = packets[0]
+    # The wide frame is canonicalized to the pinned order for downstream callers,
+    assert packet.frame.columns == ["ID", "VALUE"]
+    assert packet.frame.rows() == [(1, "one")]
+    # while the receipt-bearing header tuple still records what the provider sent.
+    assert packet.headers == ("VALUE", "ID")
 
 
 def test_lossless_fallback_retains_occurrences_ordinals_values_and_empty_set(

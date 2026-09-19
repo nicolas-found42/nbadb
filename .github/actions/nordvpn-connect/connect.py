@@ -1681,8 +1681,18 @@ class NordVpnConnectAction:
                 self.nba_probe_status = "stack_transport_failed"
                 print(f"::warning::{self.nba_probe_diagnostic}")
                 return False
+            if failure_kind == "empty":
+                # NBA's edge soft-blocks flagged exit IPs with success-shaped empty
+                # result sets: the small commonteamyears probe passes while heavier
+                # player endpoints return zero rows. Identical code and params
+                # return full data from residential IPs, so this is host-rejection
+                # evidence, not a response-contract failure. Quarantine the host
+                # and let the bounded rotation try the next recommended server.
+                self.nba_probe_status = "stack_empty_rejection"
+                print(f"::warning::{self.nba_probe_diagnostic}")
+                return False
             if (
-                failure_kind in {"empty", "invalid_values", "missing_columns"}
+                failure_kind in {"invalid_values", "missing_columns"}
                 or classification_error_type in NBA_STACK_PROBE_CONTRACT_ERROR_TYPES
             ):
                 self.nba_probe_status = "stack_contract_error"

@@ -252,8 +252,10 @@ requires replacing or wrapping the HTTP transport `nba_api` uses (e.g. a TLS/HTT
 fingerprint-impersonating client such as `curl_cffi` swapped in for
 `NBAStatsHTTP`'s session) without breaking the pinned `nba_api 1.11.4` contract,
 `STATS_HEADERS` parity tests, or response parsing. This is a new runtime dependency and
-a change to the exact request path every extractor and its tests assume — see open
-questions below.
+a change to the exact request path every extractor and its tests assume. Full
+primary-source evidence, ranked alternatives, and the maintainer decisions this requires
+are gathered in [[../topics/tls-fingerprint-mitigation|TLS Fingerprint Mitigation for
+the NBA Stats API]] — see open questions below.
 
 ## Related notes
 
@@ -265,6 +267,8 @@ questions below.
   credentials
 - [[../topics/database-conventions|Database Conventions]] — what a completed build
   produces locally
+- [[../topics/tls-fingerprint-mitigation|TLS Fingerprint Mitigation for the NBA Stats
+  API]] — evidence base and ranked options for the open root-cause decision above
 
 ## Provenance
 

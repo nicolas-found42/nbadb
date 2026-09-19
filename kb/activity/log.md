@@ -428,3 +428,23 @@
   TLS/HTTP2 fingerprint-impersonating client such as `curl_cffi` for `nba_api`'s session)
   without breaking the pinned `nba_api 1.11.4` contract or `STATS_HEADERS` parity tests —
   not resolved in this session; see the note's "Root cause" section.
+
+### [2026-09-19 09:30] TLS Fingerprint Mitigation Research: New Note
+- Mode: research capture (new maintained note; no source, test, or workflow changes)
+- Summary: Spawned a background research agent to investigate mitigations for the
+  `requests`/urllib3 TLS/HTTP2 fingerprint block diagnosed against `nba_api==1.11.4`'s
+  `NBAStatsHTTP` client (prior entry above). Findings captured in new
+  `wiki/topics/tls-fingerprint-mitigation.md`: primary-source evidence on JA3/JA4
+  fingerprinting, a ranked comparison of `curl_cffi`, `curl-impersonate`, `tls-client`,
+  `httpx`, and other candidates against nbadb's exact `_ThreadLocalSessionMixin`
+  integration contract, and a recommended approach (`curl_cffi`'s
+  `requests.Session(impersonate=...)` drop-in) with an implementation sketch — no code
+  changed.
+- Companion source change: none (research-only; no repository behavior touched).
+- Cross-link: `wiki/operations/full-extraction-requirements.md`'s "Root cause" section
+  now links to the new note instead of restating the alternatives inline.
+- Coverage index: added row for the new note (`indexes/coverage.md`).
+- Risks / rollback: additive KB-only batch (one new file, two small edits to existing KB
+  files); rollback is a straight revert.
+- Still open: the maintainer decision on which transport to adopt, and the actual
+  implementation, remain unresolved — this batch only supplies the evidence base.

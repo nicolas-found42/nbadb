@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
 import time
 
 import requests
@@ -99,6 +100,56 @@ def _raw_requests_get(url: str, params: dict[str, object], timeout: tuple[float,
         )
 
 
+_CURL_HEADERS = (
+    ("Host", "stats.nba.com"),
+    (
+        "User-Agent",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    ),
+    ("Accept", "application/json, text/plain, */*"),
+    ("Accept-Language", "en-US,en;q=0.5"),
+    ("Accept-Encoding", "gzip, deflate, br"),
+    ("Connection", "keep-alive"),
+    ("Referer", "https://www.nba.com/"),
+    ("Pragma", "no-cache"),
+    ("Cache-Control", "no-cache"),
+    (
+        "Sec-Ch-Ua",
+        '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    ),
+    ("Sec-Ch-Ua-Mobile", "?0"),
+    ("Sec-Fetch-Dest", "empty"),
+)
+
+
+def _curl_probe(label: str, url: str, *, max_time: float = 90.0) -> None:
+    cmd = [
+        "curl",
+        "-sS",
+        "--compressed",
+        "--connect-timeout",
+        "5",
+        "--max-time",
+        str(max_time),
+        "-o",
+        "/tmp/curl_probe_out.json",
+        "-w",
+        "%{http_code} %{time_total} %{size_download}",
+    ]
+    for name, value in _CURL_HEADERS:
+        cmd.extend(("-H", f"{name}: {value}"))
+    cmd.append(url)
+    started = time.monotonic()
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=max_time + 15)
+    elapsed = time.monotonic() - started
+    print(
+        f"curl_probe[{label}] rc={result.returncode} elapsed={elapsed:.1f}s "
+        f"stdout={result.stdout!r} stderr={result.stderr.strip()!r}",
+        flush=True,
+    )
+
+
 def main() -> int:
     _print_env()
     _dns_resolve("stats.nba.com")
@@ -107,6 +158,14 @@ def main() -> int:
         "https://stats.nba.com/stats/commonallplayers",
         {"LeagueID": "00", "Season": "2024-25", "IsOnlyCurrentSeason": "1"},
         timeout=(30.0, 120.0),
+    )
+    _curl_probe(
+        "commonteamyears-control",
+        "https://stats.nba.com/stats/commonteamyears?LeagueID=00",
+    )
+    _curl_probe(
+        "commonallplayers-target",
+        "https://stats.nba.com/stats/commonallplayers?LeagueID=00&Season=2024-25&IsOnlyCurrentSeason=1",
     )
     return 0
 

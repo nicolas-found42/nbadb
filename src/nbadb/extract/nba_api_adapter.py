@@ -20,14 +20,14 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
+import certifi
 import polars as pl
-import requests
+from curl_cffi.requests import Session as CurlSession
 from nba_api.library.http import NBAResponse
 from nba_api.live.nba.library.http import NBALiveHTTP
 from nba_api.stats.library.http import STATS_HEADERS, NBAStatsHTTP, NBAStatsResponse
-from requests.adapters import HTTPAdapter
 
 from nbadb.core.errors import (
     ExtractionError,
@@ -802,20 +802,88 @@ def _raise_upstream_status(status: int, *, source: str) -> None:
     )
 
 
+def _requests_compatible_params(
+    params: Mapping[str, object] | Sequence[tuple[str, object]] | None,
+) -> list[tuple[str, str]] | None:
+    """Project provider query parameters onto ``requests``' exact wire semantics.
+
+    ``curl_cffi`` serialises a ``None`` value as the literal ``"None"`` and a
+    ``bool`` as JSON ``true``/``false``; ``requests`` omits ``None`` entries
+    entirely and renders ``bool`` via ``str()``.  The pinned ``nba_api``
+    endpoints emit both shapes, so the transport swap must preserve the
+    request that upstream already answered.
+    """
+
+    if params is None:
+        return None
+    items = cast("Mapping[str, object]", params).items() if isinstance(params, Mapping) else params
+    encoded: list[tuple[str, str]] = []
+    for key, value in items:
+        values = value if isinstance(value, list | tuple) else (value,)
+        for item in values:
+            if item is None:
+                continue
+            encoded.append((key, item if isinstance(item, str) else str(item)))
+    return encoded
+
+
+_NO_AMBIENT_PROXY: Final[dict[str, str]] = {"all": ""}
+
+
+class _PinnedTransportSession(CurlSession):
+    """Browser-fingerprinted transport with ``requests``-identical egress."""
+
+    def request(
+        self,
+        method: Any,
+        url: str,
+        params: Mapping[str, object] | Sequence[tuple[str, object]] | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        # `curl_cffi` accepts `trust_env` but never reads it, so libcurl still
+        # resolves `http_proxy`/`https_proxy`/`ALL_PROXY` whenever no proxy is
+        # set for the call. An empty proxy string is libcurl's documented way
+        # to disable that lookup, restoring `requests`' `trust_env=False`
+        # contract while leaving nbadb's own configured proxies authoritative.
+        if not kwargs.get("proxies") and not kwargs.get("proxy") and not self.proxies:
+            kwargs["proxies"] = dict(_NO_AMBIENT_PROXY)
+        return super().request(
+            method,
+            url,
+            _requests_compatible_params(params),
+            *args,
+            **kwargs,
+        )
+
+
 class _ThreadLocalSessionMixin:
     _thread_local = threading.local()
 
     @classmethod
-    def get_session(cls) -> requests.Session:
+    def get_session(cls) -> _PinnedTransportSession:
         session = getattr(cls._thread_local, "session", None)
         if session is None:
-            session = requests.Session()
-            # Extraction routing is explicit.  Ambient HTTP(S)_PROXY values
-            # must not silently change the egress contract.
-            session.trust_env = False
-            adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1)
-            session.mount("https://", adapter)
-            session.mount("http://", adapter)
+            # NBA's edge terminates the pinned `nba_api` runtime's stock
+            # `requests`/urllib3 client on TLS/HTTP2 fingerprint (JA3/JA4 +
+            # HTTP/2 SETTINGS) alone, independent of headers, proxy, or VPN
+            # exit IP -- see `kb/wiki/topics/tls-fingerprint-mitigation.md`.
+            # `curl_cffi` impersonates a real browser's TLS/HTTP2 fingerprint
+            # while leaving nbadb's own pinned header contract untouched
+            # (`default_headers=False`); `retry=0` keeps nbadb's own bounded
+            # retry/circuit-breaker layer as the sole retry authority. An
+            # explicit `certifi` bundle pins the trust anchors `requests`
+            # used, which `curl_cffi` would otherwise take from ambient
+            # `SSL_CERT_FILE`/`CURL_CA_BUNDLE`/`REQUESTS_CA_BUNDLE`.
+            session = _PinnedTransportSession(
+                impersonate="chrome",
+                default_headers=False,
+                retry=0,
+                # `curl_cffi` annotates `verify` as `bool`, but its own
+                # implementation treats a `str` as the CA bundle path
+                # (`requests/utils.py` `CurlOpt.CAINFO`).
+                verify=certifi.where(),  # ty: ignore[invalid-argument-type]
+            )
             cls._thread_local.session = session
         return session
 

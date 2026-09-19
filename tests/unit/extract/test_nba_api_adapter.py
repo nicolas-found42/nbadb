@@ -7,11 +7,15 @@ from dataclasses import asdict, replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
+import certifi
 import polars as pl
 import pytest
+import requests
+from curl_cffi.requests import Session as CurlSession
+from curl_cffi.requests.utils import update_url_params
 from nba_api.library.http import NBAResponse
 from nba_api.live.nba.endpoints import PlayByPlay, ScoreBoard
-from nba_api.stats.endpoints import PlayByPlayV3
+from nba_api.stats.endpoints import PlayByPlayV3, PlayerGameLogs
 from nba_api.stats.library.http import NBAStatsResponse
 
 from nbadb.core.errors import (
@@ -1117,12 +1121,63 @@ def test_provider_sessions_are_thread_local_and_ignore_ambient_proxies(
 ) -> None:
     monkeypatch.setenv("HTTPS_PROXY", "http://ambient.invalid")
     NbaDbStatsHTTP.evict_session()
+    captured: list[Any] = []
 
+    def _capture(_self: Any, _method: str, _url: str, *args: Any, **kwargs: Any) -> str:
+        captured.append(kwargs.get("proxies"))
+        return "sent"
+
+    monkeypatch.setattr(CurlSession, "request", _capture)
     first = NbaDbStatsHTTP.get_session()
     second = NbaDbStatsHTTP.get_session()
 
     assert first is second
-    assert first.trust_env is False
+    assert first.verify == certifi.where()
+
+    first.get("https://stats.nba.com/stats/playergamelogs")
+    first.get("https://stats.nba.com/stats/playergamelogs", proxies={"all": "http://owned.invalid"})
+
+    # An empty proxy string is libcurl's documented opt-out from the ambient
+    # `HTTPS_PROXY` lookup; nbadb's own configured proxy stays authoritative.
+    assert captured == [{"all": ""}, {"all": "http://owned.invalid"}]
+    NbaDbStatsHTTP.evict_session()
+
+
+def test_provider_session_encodes_query_exactly_like_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "https://stats.nba.com/stats/playergamelogs"
+    endpoint_parameters = PlayerGameLogs(get_request=False).parameters
+    assert any(value is None for value in endpoint_parameters.values())
+
+    captured: list[Any] = []
+
+    def _capture(
+        _self: Any,
+        _method: str,
+        _url: str,
+        params: Any = None,
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> str:
+        captured.append(params)
+        return "sent"
+
+    monkeypatch.setattr(CurlSession, "request", _capture)
+    NbaDbStatsHTTP.evict_session()
+    session = NbaDbStatsHTTP.get_session()
+
+    for parameters in (
+        endpoint_parameters,
+        {"Flag": True, "Season": "2024-25"},
+        {"TeamID": [1610612737, 1610612738]},
+    ):
+        assert session.get(url, params=parameters) == "sent"
+        assert (
+            update_url_params(url, captured[-1])
+            == requests.Request("GET", url, params=parameters).prepare().url
+        )
+
     NbaDbStatsHTTP.evict_session()
 
 

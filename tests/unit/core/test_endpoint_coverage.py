@@ -1107,7 +1107,7 @@ def test_build_artifacts_counts_explicit_staging_key_exclusions(tmp_path: Path) 
     assert support_rows["player_vs_player"]["downstream_status"] == "compatibility_reference_only"
     assert len(support_rows["player_vs_player"]["downstream_reasons"]) == 2
     assert "model_excluded" not in support_rows["player_vs_player"]["contract_gaps"]
-    assert "transform_contract_missing" in support_rows["player_vs_player"]["contract_gaps"]
+    assert "transform_contract_missing" not in support_rows["player_vs_player"]["contract_gaps"]
 
 
 def test_build_artifacts_does_not_mark_consumed_excluded_staging_keys_as_model_excluded(
@@ -1349,7 +1349,7 @@ def test_normalizes_runtime_aliases_and_covers_video_endpoints(tmp_path: Path) -
     support_rows = {row["endpoint_name"]: row for row in artifacts["support_matrix"]}
     assert support_rows["video_status"]["contract_status"] == "gap"
     assert support_rows["video_status"]["downstream_status"] == "compatibility_reference_only"
-    assert "transform_contract_missing" in support_rows["video_status"]["contract_gaps"]
+    assert "transform_contract_missing" not in support_rows["video_status"]["contract_gaps"]
 
 
 def test_runtime_contract_mapping_prefers_canonical_contract_over_alias() -> None:

@@ -2658,7 +2658,19 @@ class EndpointCoverageGenerator:
                     contract_gaps.append("staging_contract_missing")
                 if downstream_status == "excluded":
                     contract_gaps.append("model_excluded")
-                if not transform_outputs:
+                if not transform_outputs and downstream_status != "compatibility_reference_only":
+                    # `compatibility_reference_only` is a terminal, authored
+                    # disposition (`_MODEL_OWNERSHIP_STATS_ENDPOINTS`): a
+                    # maintainer-reasoned decision that this endpoint's staged
+                    # data intentionally has no star-schema consumer. That
+                    # explicit classification already lives in
+                    # `downstream_status`/`downstream_reasons` on every row,
+                    # so it is adequacy-complete rather than a blocking
+                    # transform gap, matching how `modeled` and
+                    # `passthrough_only` rows are never flagged for having a
+                    # transform (they have one) and how the adequacy gate
+                    # already treats "compatibility-reference" as one of its
+                    # explicitly classified, always-passing buckets.
                     contract_gaps.append("transform_contract_missing")
             if input_schema_missing_staging_keys:
                 contract_gaps.append("input_schema_missing")

@@ -75,7 +75,7 @@ def main() -> int:
     computed = current_season()
     print(f"current_season() -> {computed!r}", flush=True)
     season = os.environ.get("DEBUG_SEASON") or "2024-25"
-    _describe(season, timeout=90, attempts=4)
+    _describe(season, timeout=90, attempts=1)
     return 0
 
 

@@ -38,6 +38,9 @@ jobs:
           nordvpn-token: ${{ secrets.NORDVPN_TOKEN }}
           nba-stack-probe-enabled: "false"
 
+      - name: Diagnose raw HTTP/socket path to stats.nba.com
+        run: uv run python .github/scripts/debug_raw_http.py
+
       - name: Diagnose CommonAllPlayers contract
         env:
           DEBUG_SEASON: ${{ inputs.season }}

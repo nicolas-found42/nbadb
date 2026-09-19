@@ -23,6 +23,10 @@ Central index for operational procedures. Use this page to find the exact runboo
 - **[[../routes/operator-route|Operator Route]]** — Game-day operations board: symptom chooser and recovery loop
 - **`docs/content/docs/guides/daily-updates.mdx`** — Authored daily operations runbook in docs site
 
+## Full Extraction (CI)
+
+- **[[full-extraction-requirements|Full Extraction Requirements]]** — Human prerequisites for dispatching `full-extraction.yml`: NordVPN credential contract, repo secrets, fork Actions activation, direct-mode fallback
+
 ## Troubleshooting & Recovery
 
 - **[[troubleshooting|Troubleshooting Playbook]]** — Film-room diagnostic guide; start with exact failing artifact or command

@@ -465,3 +465,36 @@
   files); rollback is a straight revert.
 - Still open: the maintainer decision on which transport to adopt, and the actual
   implementation, remain unresolved — this batch only supplies the evidence base.
+
+### [2026-09-19 16:20] Implemented curl_cffi transport swap (TLS fingerprint mitigation)
+- Mode: improve
+- Summary: Landed the remediation the prior two batches researched — nbadb's session
+  factory now returns a `curl_cffi` `_PinnedTransportSession` (browser-fingerprinted
+  TLS/HTTP-2, `default_headers=False`, `retry=0`, `verify=certifi.where()`), with
+  requests-compatible query-parameter encoding, in-code no-ambient-proxy enforcement
+  (`trust_env` is inert in curl_cffi; `proxies={"all": ""}` restores the old contract),
+  `certifi` promoted to a direct dependency, and curl transport-layer fault names
+  classified `transport_transient` in `nbadb.core.extraction_failures`.
+- `raw`: unchanged
+- `wiki`: `wiki/topics/tls-fingerprint-mitigation.md` (implemented-remediation section,
+  decisions taken incl. deliberate `chrome`-alias deviation, verification record,
+  refreshed line anchors)
+- `indexes`: `indexes/coverage.md` (topic row moved from "recommends … no
+  implementation performed" to implemented status)
+- `schema`: unchanged (`SAFE_ROOT_ERROR_NAMES` untouched; curl fault names map onto
+  existing safe roots, so `root_exception_class`'s `isin` constraint is stable)
+- `config`: unchanged
+- `canonical material`: annotated (installed `curl_cffi` 0.16.3 sources inspected for
+  the `trust_env` inertness, CA-default, and proxy-application findings; provenance
+  rows in the topic note unchanged)
+- `derived output`: none
+- `vault`: no frontmatter/alias/embed changes; no shared `.obsidian/` surfaces touched
+- Companion source change: `src/nbadb/extract/nba_api_adapter.py`,
+  `src/nbadb/core/extraction_failures.py`, `pyproject.toml` + `uv.lock` (certifi),
+  `tests/unit/extract/test_nba_api_adapter.py` (session test replaced, red/green
+  verified), `tests/unit/core/test_extraction_failures.py` (curl-code cases).
+- Risks / rollback: revert the adapter+classifier commits to return to the `requests`
+  transport (which is fingerprint-blocked upstream — rollback only makes sense paired
+  with a different mitigation); the KB edits revert independently.
+- Still open: live confirmation through the CI VPN lane (local runs cannot reach
+  `stats.nba.com` from this network); then the full-extraction dispatch itself.

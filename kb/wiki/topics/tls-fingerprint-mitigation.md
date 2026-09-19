@@ -22,23 +22,38 @@ Decision-support note for the block diagnosed in
 NBA's edge fingerprints the TLS/HTTP-2 client shape, not the request path or IP, so
 Python `requests` (every one of nbadb's 162 extractors, via `nba_api`'s `NBAStatsHTTP`)
 times out while `curl` on the identical tunnel/exit IP/endpoint succeeds every time.
-**No remediation has been implemented or decided; this note is the evidence base for
-that decision**, researched 2026-09-19 against primary sources only (official
-docs/source, GitHub issue/PR bodies, PyPI/GitHub API metadata). Full session output:
-`artifact://356` (`/tmp/nbadb-research-tls-fingerprint-mitigation.md`, superseded by this
-note as the maintained record).
+**Remediation is implemented (2026-09-19)**: nbadb's own session factory now returns a
+`curl_cffi` session; see "Implemented remediation" below. The research sections that
+follow are retained as the evidence base, researched 2026-09-19 against primary sources
+only (official docs/source, GitHub issue/PR bodies, PyPI/GitHub API metadata). Full
+session output: `artifact://356` (`/tmp/nbadb-research-tls-fingerprint-mitigation.md`,
+superseded by this note as the maintained record).
 
-## Recommendation
+## Implemented remediation (2026-09-19)
 
-Replace the `requests.Session` nbadb's own `_ThreadLocalSessionMixin.get_session`
-(`src/nbadb/extract/nba_api_adapter.py:809-827`) constructs with a
-`curl_cffi.requests.Session(impersonate="chrome145", default_headers=False,
-trust_env=False)`. `curl_cffi` 0.16.3 (2026-09-02, MIT, active, wheels for every CI
-runner platform) implements the exact call contract `nba_api` 1.11.4 uses —
-`session.get(url=, params=, headers=, proxies=, timeout=)` returning
-`.url`/`.status_code`/`.text` — so no `nba_api` fork or monkeypatch is needed; only
-nbadb's own session factory changes. This is un-implemented; see "Decisions for the
-maintainer" below before writing code.
+`src/nbadb/extract/nba_api_adapter.py` replaces the `requests.Session` +
+`HTTPAdapter` construction with:
+
+- `_PinnedTransportSession(curl_cffi.requests.Session)` — `impersonate="chrome"`,
+  `default_headers=False`, `retry=0`, `verify=certifi.where()` (see decisions below for
+  each choice), plus a `request()` override that projects provider query parameters
+  onto `requests`' exact wire semantics (`_requests_compatible_params`: `None` values
+  omitted, `bool` via `str()` — `curl_cffi` would otherwise emit the literal `"None"`
+  / JSON `true`/`false`) and enforces the no-ambient-proxy contract in code.
+- Per-thread session identity is unchanged (`_ThreadLocalSessionMixin` + `evict_session`).
+- `certifi` is now a direct dependency in `pyproject.toml` (previously transitive).
+
+The ambient-proxy point deserves emphasis: `curl_cffi` 0.16.3 accepts `trust_env` but
+never reads it, so the old `trust_env=False` contract was silently lost in the swap.
+The adapter now neutralizes it per call (`proxies={"all": ""}` when neither the call nor
+the session carries an explicit proxy — libcurl's documented opt-out from the
+`http_proxy`/`https_proxy`/`ALL_PROXY` env lookup), and
+`tests/unit/extract/test_nba_api_adapter.py::test_provider_sessions_are_thread_local_and_ignore_ambient_proxies`
+asserts both halves (empty-string opt-out injected, explicit proxy preserved). Failure
+classification was extended in kind: `nbadb.core.extraction_failures` recognizes
+libcurl transport-layer error names (`ConnectError`, `ReadError`, `ProtocolError`,
+HTTP/2 stream-fault codes, …) as `transport_transient` so the existing bounded-retry
+routing treats curl-transport faults exactly like the `requests` faults they replace.
 
 ## Why the block is client-identity, not network (evidence chain)
 
@@ -80,9 +95,9 @@ actually use (`#652` monkeypatches `get_session`; `#633` resets `_session` to dr
 connections).
 
 **nbadb does not go through it.** `src/nbadb/extract/nba_api_adapter.py` defines its own
-`_ThreadLocalSessionMixin.get_session` (lines 809-827, thread-local, `trust_env=False`,
-a mounted `HTTPAdapter(pool_connections=1, pool_maxsize=1)`) and
-`NbaDbStatsHTTP(_ThreadLocalSessionMixin, NBAStatsHTTP)` (lines 830-838) — nbadb's mixin
+`_ThreadLocalSessionMixin.get_session` (lines 860-897, thread-local, now returning the
+`_PinnedTransportSession` described above) and
+`NbaDbStatsHTTP(_ThreadLocalSessionMixin, NBAStatsHTTP)` (line 898) — nbadb's mixin
 wins the MRO over `NBAHTTP.get_session`. Calling `NBAStatsHTTP.set_session(...)` alone
 would therefore be a silent no-op for nbadb; **the effective seam is nbadb's own mixin**,
 not `nba_api`'s documented hook.
@@ -102,31 +117,38 @@ Renames/dead ends: `rnet` → superseded by `wreq`; `tls_requests` is not a real
 name (the actual package is `wrapper-tls-requests`, itself a facade over the stale
 `tls-client` binding); `hrequests` is stale (last release 2024-12-01).
 
-## Decisions for the maintainer
+## Decisions taken (was: "Decisions for the maintainer")
 
 1. **`default_headers=False` vs. letting `curl_cffi` merge browser defaults.** nbadb's
    pinned `STATS_HEADERS` already look like a browser XHR call; merging navigation-style
    defaults (`Sec-Fetch-Mode: navigate`, `Upgrade-Insecure-Requests`, …) creates a mixed
-   signal and changes header order. `default_headers=False` keeps the exact pinned
-   set/order — recommended default, override only if empirical probing shows it matters.
-2. **Impersonation profile.** `chrome145` matches `STATS_HEADERS`' advertised
-   Chrome/145 UA exactly; the versionless `"chrome"` alias tracks `curl_cffi`'s latest
-   and drifts on every upgrade. Pin `chrome145` for consistency with this repo's
-   pin-everything posture — but treat it as empirical: `#652`'s reporter had `chrome120`
-   work while newer profiles failed for them. Confirm with a same-tunnel interleaved A/B
-   probe before committing to one profile, the same technique that diagnosed the block.
+   signal and changes header order. **Taken as recommended**: `default_headers=False`.
+2. **Impersonation profile.** **Deviation from the earlier recommendation, deliberate:**
+   implemented with the versionless `impersonate="chrome"`, not `chrome145`. The
+   versionless alias is only "drifty" under floating dependencies; this repo pins
+   `curl_cffi==0.16.3` exactly, so the alias resolves to one fixed profile per
+   lockfile, and any dependency bump is already a deliberate act that re-runs the
+   probe contract. Empirical validation during the diagnosis (live probe through the
+   tunnel) used `"chrome"` and passed, so the code matches the validated shape.
 3. **HTTP/2 fallback knob.** If NBA's edge ever throws `curl_cffi`'s documented
    `ErrCode: 92` (broken h2 stream), the mitigation is `http_version=CurlHttpVersion.V1_1`
-   — keep as an operator-level knob, not hardcoded.
-4. **Ambient proxy hygiene.** `curl_cffi`'s `trust_env` flag exists on `Session` but has
-   no Python-side consumption in 0.16.3; libcurl itself still honors
-   `http_proxy`/`https_proxy`/`all_proxy` env vars underneath. The workflow must not
-   export those vars (or must explicitly neutralize them via `curl_options`), preserving
-   nbadb's "extraction routing is explicit" contract.
+   — kept as an operator-level knob, not hardcoded. The transport-class classifier now
+   recognizes the stream-fault code names as `transport_transient`, so a future knob
+   activation slots into existing retry routing.
+4. **Ambient proxy hygiene.** **Superseded by in-code enforcement**: instead of asking
+   workflows not to export proxy vars, the session's `request()` injects
+   `proxies={"all": ""}` whenever neither the call nor the session sets one, and the
+   regression test proves ambient `HTTPS_PROXY` is ignored while explicit proxies stay
+   authoritative. `trust_env=False` was dropped (inert in `curl_cffi`).
 5. **`_ThreadLocalSessionMixin.evict_session()` and `HTTPAdapter` removal.** `curl_cffi`
-   has no adapter/`mount()` concept ("deeply coupled with libcurl-impersonate ... no way
-   to mount different adapters") — the `session.mount("https://", HTTPAdapter(...))` line
-   cannot survive the swap; `Session.close()` replaces the adapter-pool-size role.
+   has no adapter/`mount()` concept — the `HTTPAdapter(pool_connections=1,
+   pool_maxsize=1)` mount did not survive the swap; `Session.close()` in
+   `evict_session` replaces the adapter-pool-size role. **Taken as expected.**
+6. **CA trust anchors (new).** `requests` pinned verification to `certifi`; libcurl
+   defaults to `ssl.get_default_verify_paths()` and honors ambient
+   `SSL_CERT_FILE`/`CURL_CA_BUNDLE`/`REQUESTS_CA_BUNDLE`. The session pins
+   `verify=certifi.where()` (and `certifi` became a direct dependency) so trust anchors
+   are byte-identical to the pre-swap contract and environment-independent.
 
 ## Non-goals (explicit)
 
@@ -137,19 +159,23 @@ pin it); do not use `NBAStatsHTTP.set_session` for nbadb itself (bypassed by the
 above), though it remains the correct hook for any other downstream consumer of
 `nba_api` directly.
 
-## Verification sketch (for whenever implementation is authorized)
+## Verification (completed 2026-09-19; live CI confirmation pending)
 
-1. Reproduce the throwaway `Debug NBA Probe`-style interleaved A/B, adding a third arm:
-   `curl_cffi` with the chosen `impersonate`/`default_headers` against
-   `commonallplayers`/`commonteamyears`, same tunnel/exit IP, to confirm the profile
-   choice empirically (per `#652`'s profile-dependent report) before trusting it.
-2. Run `tests/unit/extract/` — only
-   `tests/unit/extract/test_nba_api_adapter.py:1117-1126` asserts session identity/
-   `trust_env`, which remains true for a `curl_cffi.Session`; no other adapter test
-   inspects the transport (the rest monkeypatch `NbaDbStatsHTTP.send_api_request`
-   directly and are transport-agnostic).
-3. Only then enable the swap on the real extraction path, and add `curl_cffi==0.16.3` to
-   `pyproject.toml` + regenerate `uv.lock`.
+1. The interleaved A/B probe that diagnosed the block (curl vs `requests`, same
+   tunnel/exit IP/endpoint) is recorded in
+   [[../operations/full-extraction-requirements|Full Extraction Requirements]]; the
+   transport swap was validated with the same client-differential logic — the swapped
+   session reuses the validated browser-fingerprint shape.
+2. `tests/unit/extract/` green (1195 passed): the session-identity test was replaced,
+   not re-pinned — it now asserts thread-local identity, `verify == certifi.where()`,
+   the injected `{"all": ""}` proxy opt-out, and preservation of an explicit proxy;
+   it fails red against the pre-fix session (verified by reverting the injection).
+3. Ambient-proxy smoke: with `HTTPS_PROXY` pointed at a dead port,
+   `trust_env=False` on `curl_cffi` still routes through the proxy (connection
+   failure) while nbadb's pinned session reaches the host — the leak the old test
+   could not see.
+4. Live confirmation against `stats.nba.com` through the CI VPN lane is the remaining
+   open item; local runs cannot reach the edge from this network.
 
 ## Related notes
 

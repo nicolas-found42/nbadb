@@ -49,9 +49,9 @@ The KB is additive-first. Existing docs, code, and committed project instruction
 - [[wiki/routes/stakeholder-route|Stakeholder Route]]
 
 ## Browse by system area
-- Warehouse model: [[wiki/model/table-family-guide|Table Family Guide]], [[wiki/model/schema-wayfinding|Schema Wayfinding]], [[wiki/model/lineage-wayfinding|Lineage Wayfinding]], [[wiki/model/endpoint-coverage|Endpoint Coverage]]
+- Warehouse model: [[wiki/model/table-family-guide|Table Family Guide]], [[wiki/model/schema-wayfinding|Schema Wayfinding]], [[wiki/model/lineage-wayfinding|Lineage Wayfinding]], [[wiki/model/endpoint-coverage|Endpoint Coverage]], [[wiki/topics/database-conventions|Database Conventions]]
 - Source boundary: [[wiki/topics/upstream-nba-api|Upstream NBA API]], [[wiki/topics/extraction-boundary|Extraction Boundary]]
-- Operations: [[wiki/operations/runbooks|Runbook Registry]], [[wiki/operations/run-modes|Run Modes]], [[wiki/operations/kaggle-distribution|Kaggle Distribution]], [[wiki/operations/troubleshooting|Troubleshooting]]
+- Operations: [[wiki/operations/runbooks|Runbook Registry]], [[wiki/operations/run-modes|Run Modes]], [[wiki/operations/full-extraction-requirements|Full Extraction Requirements]], [[wiki/operations/kaggle-distribution|Kaggle Distribution]], [[wiki/operations/troubleshooting|Troubleshooting]]
 - Tooling: [[wiki/tooling/duckdb-polars-pandera-stack|DuckDB, Polars, and Pandera in nbadb]], [[wiki/tooling/sqlmodel-typer-textual-stack|SQLModel, Typer, and Textual in nbadb]], [[wiki/tooling/obsidian-vault-conventions|Obsidian Vault Conventions for nbadb KB]]
 - Project orientation: [[wiki/topics/project-overview|Project Overview]]
 - Execution roadmap: [[wiki/topics/strict-source-complete-roadmap|Strict Source-Complete Roadmap]], [[wiki/topics/full-extraction-control-plane|Full Extraction Control Plane]], [[wiki/topics/live-snapshot-contract|Live Snapshot Contract]]

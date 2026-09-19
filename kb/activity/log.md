@@ -322,3 +322,109 @@
 - `path map`: none
 - `link/backlink impact`: none
 - Risks / rollback: low-risk ignore-only change; rollback is a straight revert of `kb/.gitignore` and this log entry
+
+### [2026-09-19 02:00] Database Conventions Note
+- Mode: improve
+- Summary: Added `wiki/topics/database-conventions.md`, a warehouse-lifecycle and conventions reference (pipeline tables, staging keys, star families, validation tiers, exports, scan gate, Kaggle-seeding path), grounded in source-line citations and the 2026-09-19 Kaggle v238 bundle observation.
+- `raw`: unchanged
+- `wiki`: added `wiki/topics/database-conventions.md`; linked it from the Warehouse model area in `wiki/index.md`
+- `indexes`: added a coverage row in `indexes/coverage.md`
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged; `src/nbadb/`, `README.md`, and `AGENTS.md` remain authoritative
+- `provenance`: note carries a Provenance table; bundle observations are dated and marked as freshness triggers
+- `derived output`: none
+- `vault`: updated frontmatter per topic-note conventions
+- `path map`: none
+- `link/backlink impact`: one new wiki page with inbound links from `wiki/index.md` and `indexes/coverage.md`
+- Risks / rollback: KB-only additive batch; rollback is a straight revert of the three touched KB files
+
+### [2026-09-19 02:40] Full Extraction Requirements Note
+- Mode: improve
+- Summary: Added `wiki/operations/full-extraction-requirements.md`, the human prerequisites for dispatching the CI full-extraction workflow: Nord-only VPN provider contract (with dated Mullvad incompatibility verdict), credential modes and secrets, dispatch inputs, fork Actions activation, and the `network_mode=direct` no-credential fallback.
+- `raw`: unchanged
+- `wiki`: added `wiki/operations/full-extraction-requirements.md`; linked from `runbooks.md` (new "Full Extraction (CI)" section) and the Operations line in `wiki/index.md`
+- `indexes`: added a coverage row in `indexes/coverage.md`
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged; `.github/workflows/full-extraction.yml`, `.github/actions/nordvpn-connect/`, and `AGENTS.md` remain authoritative
+- `provenance`: note carries a Provenance table; fork/runtime observations and the NordVPN connection limit are dated and marked as freshness triggers
+- `derived output`: none
+- `vault`: updated frontmatter per topic-note conventions
+- `path map`: none
+- `link/backlink impact`: one new wiki page with inbound links from `runbooks.md`, `wiki/index.md`, and `indexes/coverage.md`
+- Correction (same session): `targeted_smoke` reworded to direct-only per the actual workflow guard (`full-extraction.yml:321-339`); `AGENTS.md` "VPN-only" wording flagged stale; secrets guidance refined to recommend all three (configured pair + token fallback, `connect.py:894-930`)
+- Risks / rollback: KB-only additive batch; rollback is a straight revert of the four touched KB files
+
+### [2026-09-19 07:30] Full Extraction Requirements: Plan-Gate Contract Expansion
+- Mode: improve
+- Summary: Extended `wiki/operations/full-extraction-requirements.md` (did not create a parallel note) with the mode-validation constraint set (`direct_parallelism=0` requirement for `network_mode=vpn`, observed run `35428015854`) and a new "Plan gate: support-matrix and adequacy-scorecard contract" section covering both `plan`-job gates (`full-extraction.yml:466-563`) and the `transform_contract_missing` misclassification found and fixed in run `35428089035`: eight authored `compatibility_reference_only` endpoints (six `box_score_*_v2` aliases, `league_standings_legacy`, `play_by_play_legacy`) were flagged with a blocking gap despite an explicit maintainer disposition that they have no star-schema consumer by design.
+- `raw`: unchanged
+- `wiki`: expanded `wiki/operations/full-extraction-requirements.md` (mode-validation note, corrected dispatch example, new plan-gate section, three new provenance rows)
+- `indexes`: updated the `full-extraction-requirements.md` row in `indexes/coverage.md`
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged; `.github/workflows/full-extraction.yml` and `src/nbadb/core/endpoint_coverage.py` remain authoritative
+- `provenance`: three new line-anchored rows added; `source_count` bumped 8 → 11
+- `derived output`: none
+- `vault`: frontmatter `source_count` updated; `updated` date unchanged (already 2026-09-19)
+- `path map`: none
+- `link/backlink impact`: no new pages; existing inbound links from `runbooks.md`/`wiki/index.md`/`indexes/coverage.md` unaffected
+- Companion source change: `src/nbadb/core/endpoint_coverage.py` gap classification fixed (compatibility_reference_only rows no longer emit `transform_contract_missing` when `transform_outputs` is empty); `tests/unit/core/test_endpoint_coverage.py` assertions for `player_vs_player`/`video_status` updated to match; full `tests/unit/core` suite green (676 passed, 2 skipped)
+- Risks / rollback: KB-only additive batch; rollback is a straight revert of the two touched KB files (source fix tracked separately in git)
+
+### [2026-09-19 08:15] All-Time Leaders Transform: Close Remaining Unmodeled Categories
+- Mode: fix (source-only; no KB note materially expanded)
+- Summary: Follow-on to the `transform_contract_missing` classification fix above. After that fix, `nbadb audit-models --mode inventory --strictness consistency --require-result-table-contract` still reported 17 `unowned` staging entries, all `stg_all_time_*` result sets: `AllTimeLeadersGrids` returns 19 stat-category result sets but `agg_all_time_leaders` (`src/nbadb/transform/derived/agg_all_time_leaders.py`) only ever consumed 3 (`pts`, `ast`, `reb`). Confirmed this was genuinely unmodeled data (not a duplicate/alias) by inspecting `staging_map.py:2214-2293` and a raw audit row; user decided to extend the transform to all 19 categories rather than author a `compatibility_reference_only` exemption.
+- `raw`: unchanged
+- `wiki`: unchanged (no note edited)
+- `indexes`: updated the `full-extraction-requirements.md` row in `indexes/coverage.md` (backing-material and notes columns) to record the companion fix
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: `src/nbadb/transform/derived/agg_all_time_leaders.py`, `src/nbadb/schemas/star/agg_schemas.py`, `src/nbadb/core/endpoint_coverage.py` remain authoritative
+- `provenance`: none (no note touched)
+- `derived output`: none
+- `vault`: none
+- `path map`: none
+- `link/backlink impact`: none
+- Companion source change: `agg_all_time_leaders.py` rewritten to generate one CTE pair per stat category (SQL built programmatically via a category-loop helper, not hand-duplicated), still `FULL OUTER JOIN`ing all 19 categories on `player_id`/`player_name` with a `conflicting player names` error guard; `agg_schemas.py`'s `AggAllTimeLeadersSchema` extended with the 16 new value/rank column pairs; added a `stg_all_time` → `compatibility_reference_only` disposition in `_MODEL_OWNERSHIP_STAGING_KEYS` for the legacy pre-fix alias staging key (`stg_all_time_ast`/`_pts`/`_reb` sourced via `stg_all_time` before the multi-result-set staging split — retained as a documented compatibility surface, not reachable by any transform). Discovered and fixed an unrelated static-analysis gotcha while editing: `SqlTransformer.depends_on` built via a set/list comprehension over an f-string is invisible to the AST-based `_constant_string_list` discovery helper in `endpoint_coverage.py`; replaced with an explicit literal list (matches the pattern every other transformer already uses). `tests/unit/transform/test_derived_transformers.py` extended (18 new pytest cases covering all-19-category dependency declaration, disjoint-category FULL OUTER JOIN correctness, null player-id fail-closed behavior, and schema coverage); local `audit-models`/`extract-completeness --require-model-contract` gates both pass with `unowned=0`; full `tests/unit/transform`, `tests/unit/schemas`, `tests/unit/orchestrate`, `tests/unit/cli`, and `tests/unit/core/test_endpoint_coverage.py` suites green.
+- Risks / rollback: source-only batch; rollback is `git revert` of the four touched `src/`/`tests/` files plus this log entry and the coverage-index row edit.
+
+### [2026-09-19 09:00] Full Extraction: Diagnosed extract-stage hang as HTTP client TLS/fingerprint block
+- Mode: diagnosis (KB note materially expanded; no source fix — remediation needs a maintainer decision)
+- `wiki`: expanded `operations/full-extraction-requirements.md` with a new "Root cause"
+  section
+- `indexes`: updated the `full-extraction-requirements.md` row in `indexes/coverage.md`
+  (backing-material and notes columns)
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: `nba_api/stats/library/http.py` (installed package, exact pinned
+  version), `.github/actions/nordvpn-connect/connect.py` remain authoritative
+- `provenance`: added one row citing the dedicated `Debug NBA Probe` workflow's run
+  history and the exact `nba_api` HTTP client file/lines
+- `derived output`: none
+- `vault`: none
+- `path map`: none
+- `link/backlink impact`: none
+- Summary: dispatched the fixed-commit full extraction (`35430687683`); `plan` passed for
+  the first time ever, but `preflight` failed extraction with a `ConnectionError` on the
+  first real extractor call (`common_all_players`) despite a clean, verified OpenVPN
+  connection and passing lightweight control-plane/NBA-Stats curl probes. Built a
+  throwaway `Debug NBA Probe` workflow plus `.github/scripts/debug_common_all_players.py`
+  / `debug_raw_http.py` to bisect the variable; ran season-isolated retries, a raw-socket
+  bypass of the extractor stack, curl-vs-`requests` comparisons, and finally an
+  interleaved same-session A/B loop (6 rounds each). Result: `curl` succeeds 6/6 on both
+  a control endpoint and the failing target endpoint, over the identical tunnel and exit
+  IP, interleaved with 6/6 `requests`/urllib3 failures on the same target endpoint. This
+  is airtight evidence of an HTTP-client TLS/fingerprint block at NBA's edge, not a VPN,
+  DNS, throttling, or timing issue — and since every one of the 162 registered
+  extractors goes through `nba_api`'s `requests`-based `NBAStatsHTTP`, it blocks all
+  VPN-routed extraction unconditionally.
+- Risks / rollback: KB-only additive batch; rollback is a straight revert of the two
+  touched KB files. The three throwaway debug files were committed then deleted in the
+  same session (`cc2b61c`..`55e78e1` added, later commit removes them) — no functional
+  source touched, `tests/unit` and `tests/unit/core/test_endpoint_coverage.py` unaffected.
+- Open decision for the user: how to remediate the transport-layer block (e.g. swap in a
+  TLS/HTTP2 fingerprint-impersonating client such as `curl_cffi` for `nba_api`'s session)
+  without breaking the pinned `nba_api 1.11.4` contract or `STATS_HEADERS` parity tests —
+  not resolved in this session; see the note's "Root cause" section.

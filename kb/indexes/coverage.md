@@ -79,6 +79,8 @@
 | `wiki/topics/endpoint-coverage-source-summary.md` | source-summary | coverage/audit code, artifacts, docs route, and manifest bridge | active | 2026-04-22 | coverage evidence bridge |
 | `wiki/topics/nba-api-source-summary.md` | source-summary | upstream NBA captures and extractor coverage bridge | active | 2026-04-22 | upstream API evidence bridge |
 | `wiki/topics/published-examples-source-summary.md` | source-summary | README notebook list, published-example stubs, and warehouse-aligned outputs | active | 2026-04-22 | notebook/source alignment note |
+| `wiki/topics/database-conventions.md` | concept | `src/nbadb/` canon (config, client, db, staging map, schemas, pipeline, load, scanner), `README.md`, `AGENTS.md`, downloaded Kaggle bundle observation | active | 2026-09-19 | warehouse lifecycle + conventions reference with Kaggle-seeding findings |
+| `wiki/operations/full-extraction-requirements.md` | concept | `full-extraction.yml`, `nordvpn-connect` action source, `AGENTS.md`, Mullvad/NordVPN primary sources, fork API observation, run history (`35428015854`, `35428089035`, `35430687683`, Debug NBA Probe runs), `endpoint_coverage.py`, `agg_all_time_leaders.py`, `nba_api/stats/library/http.py` | active | 2026-09-19 | CI dispatch prerequisites plus plan-gate contract, plus diagnosed root cause of the `extract`-stage hang: NBA Stats API TLS/HTTP fingerprint-blocks Python `requests`/urllib3 (curl succeeds on the same tunnel/exit IP/endpoint every time) — blocks all 162 extractors over VPN pending a transport-layer decision |
 
 ## Gaps
 - [ ] Replace high-value stub-backed sources from [[stub-replacement-queue|Stub Replacement Queue]] before adding broad new note clusters.

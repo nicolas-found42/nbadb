@@ -1,0 +1,287 @@
+---
+title: Full Extraction Requirements
+tags:
+  - kb
+  - operations
+  - full-extraction
+  - ci
+  - vpn
+aliases:
+  - Full Extraction Prerequisites
+  - CI Extraction Requirements
+kind: concept
+status: active
+updated: 2026-09-19
+source_count: 12
+---
+
+# Full Extraction Requirements
+
+Use this note when the question is "what must exist before dispatching
+`.github/workflows/full-extraction.yml`?" — credentials, secrets, provider contract, and
+fork activation. For how the control plane moves lanes through planning, chaining, and
+resume once admitted, see [[../topics/full-extraction-control-plane|Full Extraction
+Control Plane]].
+
+## Verified environment state (2026-09-19)
+
+- Fork `nicolas-found42/nbadb` is **public** → standard-runner Actions minutes are free.
+- Actions API reports `enabled: true`, `allowed_actions: all` — but **zero workflows are
+  registered** until Actions is activated once for the fork (first human step below).
+- `origin/main`, `upstream/main`, and local `HEAD` are all at the same commit
+  (`f7e1e96`), so a dispatch runs exactly the checked-out code. Uncommitted local changes
+  never affect CI; they run only in local commands.
+- `gh` is authenticated as `nicolas-found42` with `repo` + `workflow` scopes, which cover
+  workflow dispatch and run observation. No default-repo pin is set (`gh repo
+  set-default nicolas-found42/nbadb`, per `docs/agents/issue-tracker.md`) — pass `-R` or
+  set the pin before plain `gh` commands.
+- **No repository secrets are configured yet.**
+
+## Human-only prerequisites
+
+1. **Activate Actions for the fork** — visit the GitHub Actions tab in a browser and
+   accept the enable prompt. Until then the API registers no workflows and dispatch
+   fails.
+2. **NordVPN subscription + credentials** — from the Nord account dashboard's
+   "manual setup" surface, obtain either the OpenVPN service credentials (username +
+   password) or an access token. See the provider contract below for why no other
+   provider works.
+3. **Set repository secrets** on the fork (next section).
+4. Optional, deferred until publication: `GH_TOKEN` (actions read + deployments write)
+   and Kaggle credentials. Publication is decoupled from extraction; the terminal
+   assurance scan does not need them.
+
+## VPN provider contract: NordVPN only
+
+The tunnel machinery is hard-coupled to NordVPN in three independent places:
+
+- Server hostnames are validated against `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.nordvpn\.com$`
+  (`.github/actions/nordvpn-connect/connect.py:33-35`); anything else is rejected as
+  `vpn_network_error`.
+- Server selection consumes Nord's ranked recommendations, with fresh recommendations
+  hash-partitioned across live slots and Nord's rank as tie-breaker (`AGENTS.md` >
+  Full Extraction Control Plane; `.github/actions/nordvpn-connect/action.yml`
+  `preferred-servers-json` / `quarantined-servers-json` inputs).
+- Connectivity is OpenVPN only — `openvpn_udp` preferred, `openvpn_tcp` fallback
+  (`action.yml` `technology` / `fallback-technology` inputs, defaults).
+
+There is no WireGuard path anywhere in the tree (repo-wide search, 2026-09-19).
+
+**Mullvad verdict: unusable, for two independent reasons.**
+1. Mullvad cannot satisfy the Nord contract: an account number produces neither NordVPN
+   service credentials nor `*.nordvpn.com` hostnames.
+2. Mullvad removed OpenVPN support entirely on 2026-01-15 and is WireGuard-only
+   (mullvad.net blog, "Removing OpenVPN 15th January 2026") — so even a hypothetical
+   generic-OpenVPN adapter would have nothing to connect to.
+
+Supporting Nord-only framing also appears in diagnostics redaction
+(`src/nbadb/contracts/raw_request_authority.py:146-148`).
+
+## Credential modes and secrets
+
+Credential admission (`full-extraction.yml:2008-2024`) runs whenever
+`network_mode != 'direct'`: either both `OPENVPN_USER` + `OPENVPN_PASSWORD`, or
+`NORDVPN_TOKEN` — otherwise the run fails closed before any lane.
+
+| Mode | Secrets | Concurrency | Cost |
+| --- | --- | --- | --- |
+| Configured credential | `OPENVPN_USER`, `OPENVPN_PASSWORD` (Nord service credentials) | `vpn_parallelism` lanes (input default `2`; production launches pass `6` and must pass the six-tunnel admission gate) | 6 of Nord's 10 simultaneous per-account connections |
+| Token-derived | `NORDVPN_TOKEN` (access token; OpenVPN credentials derived at runtime via `api.nordvpn.com/v1/users/services/credentials` with a netrc file, `connect.py:842-848`) | At most one simultaneous matrix job; parallel recommendation partitioning disabled; capacity gate skipped | 1 connection |
+
+Service credentials come from the Nord Account dashboard (`my.nordaccount.com` → NordVPN
+→ Manual setup). Nord's docs are explicit that manual/third-party logins require these
+service credentials, **not** the Nord Account email and password (support article
+"Changes to the login process on third-party apps and routers"). Any plan includes
+manual setup; a new subscription carries a 30-day money-back guarantee.
+
+Robust setup: set **all three** secrets (`OPENVPN_USER`, `OPENVPN_PASSWORD`,
+`NORDVPN_TOKEN`). Mode resolution is empirical, not presence-based: `vpn-auth-source`
+is the preflight tunnel action's own output (`full-extraction.yml:1979`), so a valid
+configured pair governs even when the token is also set. The connector prefers the
+configured pair verbatim (`prepare_auth`, `connect.py:878-907`) and engages
+token-derived service credentials only after an actual configured-credential rejection
+(`switch_to_token_auth_after_rejection`, `connect.py:909-922`) — only then do the
+parallel slot counts drop. Minimum viable is either the pair alone or the token alone.
+
+Nord's connection rule (support article "How many devices can I use with NordVPN?"):
+up to **10** simultaneous connections per account, and at most **5 per server**
+(different protocols count separately on one server). The pipeline never shares a
+server between live lanes (lane `N` owns preferred host `N`; fresh recommendations are
+hash-partitioned across slots), so `vpn_parallelism=6` means 6 distinct servers with one
+OpenVPN UDP connection each — inside both limits.
+
+Upstream liveness, probed 2026-09-19 with the connector's own shapes: the
+recommendations API returned `us8372.nordvpn.com` with `openvpn_udp`/`openvpn_tcp` for
+the exact workflow query (country 228 + technology filter), and the `.ovpn` template
+download (`downloads.nordcdn.com/configs/files/ovpn_udp/servers/<host>.udp.ovpn`,
+`connect.py:1407-1410`) returned HTTP 200 with a valid OpenVPN config body. These
+probes are freshness triggers: if dispatch fails in tunnel setup, re-probe both first.
+
+## Dispatch surface
+
+Key `workflow_dispatch` inputs (`full-extraction.yml:8-96`): `operation`
+(`extract` / `continue` / `targeted_smoke`), `network_mode` (`vpn` / `auto` / `direct`),
+`vpn_parallelism`, `direct_parallelism`, `direct_request_profile`,
+`matrix_batch_size` (default 256), `chunk_profile`, `max_iterations` (default 64),
+`retry_pipeline_failures` (default true). Continuation runs additionally require the
+exact five-field source authority (`resume_source_run_id` + `resume_source_manifest`);
+never inferred.
+
+- **Without Nord credentials, `network_mode=direct` is the only runnable mode** (the
+  credential check is skipped only for `direct`). Direct lanes use GitHub runners' own
+  egress; the mode is supported and recent commits attest free/direct capacity, but
+  NBA.com throttling/blocking of datacenter IPs is upstream-dependent — VPN is the
+  canonical production path.
+- `operation=targeted_smoke` is a one-lane **direct-only** exception, not a VPN path:
+  the guard requires `network_mode=direct`, `vpn_parallelism=0`, `direct_parallelism=1`,
+  exactly one lane and one iteration, forbids `retry_pipeline_failures`, and requires a
+  manually supplied inline or artifact-backed lane manifest
+  (`full-extraction.yml:297-300, 321-340`). It can never validate the VPN tunnel path.
+  `AGENTS.md` still describes it as "one-lane VPN-only"; that wording is stale. It is
+  never full-dataset assurance.
+- **Mode-validation is a complete constraint set, not just credential admission**
+  (`full-extraction.yml:277-292`, `workflow_guard` job): `network_mode` must be
+  exactly `vpn`/`auto`/`direct`; `network_mode=vpn` requires `direct_parallelism=0`;
+  `network_mode=direct` requires both `vpn_parallelism=0` and `direct_parallelism>=1`.
+  Omitting `direct_parallelism` on a `vpn` dispatch leaves the workflow default (`2`)
+  in place and fails `workflow_guard` with `network_mode=vpn requires
+  direct_parallelism=0` before any lane runs (observed run `35428015854`,
+  2026-09-19) — always pass it explicitly for `vpn`/`auto` dispatch.
+
+```bash
+gh workflow run full-extraction.yml -R nicolas-found42/nbadb --ref main \
+  -f operation=extract -f network_mode=vpn -f vpn_parallelism=6 -f direct_parallelism=0
+gh run watch -R nicolas-found42/nbadb <run-id>   # per iteration; the run self-chains
+```
+
+## Plan gate: support-matrix and adequacy-scorecard contract
+
+The `plan` job runs `nbadb extract-completeness --require-full
+--require-model-contract` and then two independent inline-Python gates over its
+artifacts before `preflight`/`discovery_seed`/`vpn_capacity`/`extract` run
+(`full-extraction.yml:466-563`). Both must pass; `preflight` is the first real Nord
+credential test and only runs after they do.
+
+1. **Support-matrix gap allowlist** (`full-extraction.yml:488-517`): fails if
+   `gap_breakdown` (from `endpoint-support-summary.json`) contains any key other than
+   `season_type_contract_blocked`. This is strictly stronger than `ci.yml`, which runs
+   the same CLI without `--require-model-contract` and without this gate
+   (`ci.yml:471-474`) — main can be green while `plan` is red.
+2. **Adequacy scorecard** (`full-extraction.yml:526-563`): fails if
+   `endpoint-adequacy-scorecard.json`'s summary has any nonzero
+   `coverage_gap_endpoint_count`, `contract_gap_endpoint_count`,
+   `downstream_unowned_endpoint_count`, or `downstream_excluded_endpoint_count`. This
+   gate has **no allowlist at all** — it is driven by `contract_status`
+   (`endpoint_coverage.py`'s per-row `"complete"` vs `"gap"`), so any nonempty
+   `contract_gaps` list on a row keeps it counted here even if the specific gap key is
+   allowlisted in gate 1. A fix must make the row's `contract_gaps` empty
+   (`contract_status == "complete"`), not just relabel the gap key.
+
+**Fixed 2026-09-19: `transform_contract_missing` misclassified authored
+compatibility/reference endpoints.** Run `35428089035` failed gate 1 with
+`{"transform_contract_missing": 8}` for `box_score_advanced_v2`,
+`box_score_four_factors_v2`, `box_score_misc_v2`, `box_score_scoring_v2`,
+`box_score_traditional_v2`, `box_score_usage_v2`, `league_standings_legacy`, and
+`play_by_play_legacy`. All eight carry an explicit, maintainer-authored
+`compatibility_reference_only` disposition in
+`_MODEL_OWNERSHIP_STATS_ENDPOINTS` (`endpoint_coverage.py`) stating their staged data
+is intentionally retained losslessly in silver with no star-schema consumer — the
+same terminal disposition already used, without a gap, for the seven other
+`compatibility_reference_only` endpoints that happen to have a transform (for
+example `play_by_play_v2`), and already treated as a non-blocking field fate
+(`sink_declared_reference_only`, `endpoint_coverage.py:2202-2206`) and as one of the
+adequacy gate's own explicitly-classified passing buckets (its pass message
+enumerates "compatibility-reference" endpoints alongside "modeled" and
+"passthrough"). The endpoint-level gap logic
+(`endpoint_coverage.py:2661-2674`, pre-fix) did not exempt this disposition from
+`transform_contract_missing`, so structurally-absent transforms were misclassified as
+a blocking contract gap instead of the terminal decision they actually are. Fix:
+`compatibility_reference_only` rows no longer emit `transform_contract_missing` when
+`transform_outputs` is empty; the disposition and its authored reason remain visible
+on every row via the (unaffected) `downstream_status`/`downstream_reasons` fields, so
+nothing is silently dropped per the repo's coverage trust floor. Verified:
+`gap_breakdown` goes to `{}`, `contract_gap_endpoint_count` goes to `0`, and
+`in_scope=142 extractable=139` is unchanged.
+
+Local reproduction loop (no CI round trip needed for this class of bug):
+
+```bash
+uv run nbadb extract-completeness --require-full --require-model-contract \
+  --output-dir /tmp/nbadb-coverage-local
+jq -c '.gap_breakdown' /tmp/nbadb-coverage-local/endpoint-support-summary.json
+jq '.summary.contract_gap_endpoint_count' \
+  /tmp/nbadb-coverage-local/endpoint-adequacy-scorecard.json
+```
+
+The CLI's own exit code is not the pass/fail signal locally without
+`--endpoint-analysis-docs-root` pointed at a pinned upstream `nba_api` checkout (it
+exits 1 on a separate endpoint-analysis-docs check); assert on the two artifact
+fields above, mirroring exactly what the two workflow gates read.
+
+## Root cause: NBA Stats API fingerprint-blocks the Python `requests`/urllib3 client, not the VPN
+
+**Diagnosed 2026-09-19, run chain `35430687683` → dedicated `Debug NBA Probe` workflow,
+runs `35431455179`, `35431814071`, `35432038960`/`35432041682`, `35432609487`,
+`35432932592`, `35433170984`.** `extract` was never reached: `preflight` legitimately
+connects the OpenVPN tunnel and passes the lightweight curl-based control-plane and NBA
+Stats probes, but the first real extractor call (`common_all_players`, via `nba_api`'s
+`NBAStatsHTTP` → `requests.Session.get`) hangs for the full request timeout and fails
+with `ConnectionError`/`RemoteDisconnected`/`ReadTimeout` on every attempt.
+
+A same-VPN-session, interleaved A/B loop isolated the variable cleanly:
+
+| Client | Endpoint | Result over 6 back-to-back rounds, same tunnel, same exit IP |
+|---|---|---|
+| `curl` (raw socket, curl's own TLS stack) | `commonteamyears` (control) | 6/6 success, ~0.1-0.2s each |
+| `curl` | `commonallplayers` (target) | 6/6 success (single-call and paired runs), ~0.1-0.2s each |
+| Python `requests.Session` replicating `nba_api`'s exact headers/params | `commonallplayers` | 6/6 `ReadTimeout`/`ConnectionError` at the timeout ceiling |
+
+`curl` succeeded on the *identical* endpoint, over the *identical* tunnel and exit IP,
+interleaved with (and immediately adjacent to) every `requests` failure. That rules out
+VPN server quality, exit-IP reputation, DNS, per-endpoint throttling, and timing
+correlation — the same IP is trusted for one client and dropped for the other on the
+same request. NBA's edge is fingerprinting the TLS/HTTP client (JA3/ClientHello/HTTP-2
+SETTINGS shape), not the network path. Because every one of the 162 registered
+extractors calls through `nba_api.stats.library.http.NBAStatsHTTP`
+(`requests.Session`-based), this blocks **all** VPN-routed extraction unconditionally —
+it is not fixed by server rotation, capacity-gate tuning, or credential mode, all of
+which the control plane already gets right.
+
+**Not yet decided — needs a maintainer call, not a silent fix:** the remediation
+requires replacing or wrapping the HTTP transport `nba_api` uses (e.g. a TLS/HTTP2
+fingerprint-impersonating client such as `curl_cffi` swapped in for
+`NBAStatsHTTP`'s session) without breaking the pinned `nba_api 1.11.4` contract,
+`STATS_HEADERS` parity tests, or response parsing. This is a new runtime dependency and
+a change to the exact request path every extractor and its tests assume — see open
+questions below.
+
+## Related notes
+
+- [[../topics/full-extraction-control-plane|Full Extraction Control Plane]] — what the
+  machine does once admitted
+- [[run-modes|Run Modes]] — the local CLI equivalent (`init` / `daily` / `monthly` /
+  `backfill run`)
+- [[kaggle-distribution|Kaggle Distribution]] — the publication lane and its deferred
+  credentials
+- [[../topics/database-conventions|Database Conventions]] — what a completed build
+  produces locally
+
+## Provenance
+
+| Claim or section | Raw or canonical material | Notes |
+|------------------|---------------------------|-------|
+| dispatch inputs, credential admission, `targeted_smoke` guard | `.github/workflows/full-extraction.yml:8-96, 297-300, 321-340, 2008-2024` | line-anchored, read 2026-09-19; smoke guard supersedes stale `AGENTS.md` wording |
+| configured-credential preference and token fallback on rejection | `.github/actions/nordvpn-connect/connect.py:878-907, 909-922` | `prepare_auth`, `switch_to_token_auth_after_rejection`; empirical mode via `full-extraction.yml:1979` |
+| hostname allowlist and OpenVPN technologies | `.github/actions/nordvpn-connect/connect.py:32-35`, `action.yml` | Nord-only coupling |
+| recommendation-driven server selection, capacity gate, token-derived serialization | `AGENTS.md` > Full Extraction Control Plane | maintainer contract |
+| Mullvad OpenVPN removal 2026-01-15 | https://mullvad.net/en/blog/removing-openvpn-15th-january-2026 | primary source, stable historical event |
+| NordVPN 10 simultaneous / 5 per-server rule | https://support.nordvpn.com/hc/en-us/articles/19476515228305-How-many-devices-can-I-use-with-NordVPN | volatile upstream fact; recheck before relying on >6 |
+| service credentials (not account password) for manual setup | https://support.nordvpn.com/hc/en-us/articles/19685514639633-Changes-to-the-login-process-on-third-party-apps-and-routers | volatile upstream fact |
+| 30-day money-back guarantee for new subscriptions | https://support.nordvpn.com/hc/en-us/articles/19476991311121-What-is-your-refund-policy | volatile upstream fact |
+| upstream liveness probes (recommendations API, `.ovpn` download) | `api.nordvpn.com`, `downloads.nordcdn.com`, probed 2026-09-19 with connector's exact query/URL shapes | dated runtime observation; freshness trigger |
+| no WireGuard support in tree | repo-wide grep for `wireguard`, 2026-09-19 | absence observation |
+| fork state (visibility, Actions enablement, zero registered workflows, no secrets, HEAD parity) | GitHub REST API + local `git`, observed 2026-09-19 | dated runtime observation; freshness trigger for this note |
+| mode-validation constraint set and `direct_parallelism=0` requirement | `.github/workflows/full-extraction.yml:277-292`; observed run `35428015854`, 2026-09-19 | line-anchored, read 2026-09-19 |
+| plan-gate two-gate contract (support-matrix allowlist, adequacy scorecard) | `.github/workflows/full-extraction.yml:466-563`, `ci.yml:471-474` | line-anchored, read 2026-09-19 |
+| `transform_contract_missing` misclassification and fix | `src/nbadb/core/endpoint_coverage.py` (`_MODEL_OWNERSHIP_STATS_ENDPOINTS`, gap logic ~2202-2206, ~2661-2674); run `35428089035`, 2026-09-19 | fixed same day; local repro verified `gap_breakdown={}`, `contract_gap_endpoint_count=0` |
+| `requests`/urllib3 TLS-fingerprint block vs curl; interleaved A/B isolation | Dedicated `Debug NBA Probe` workflow, runs `35431455179`, `35431814071`, `35432038960`, `35432041682`, `35432609487`, `35432932592`, `35433170984`, 2026-09-19; `nba_api/stats/library/http.py:31-58` (exact client path) | dated runtime observation; diagnostic scripts deleted after use, evidence retained here |

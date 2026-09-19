@@ -431,19 +431,36 @@
 
 ### [2026-09-19 09:30] TLS Fingerprint Mitigation Research: New Note
 - Mode: research capture (new maintained note; no source, test, or workflow changes)
+- `raw`: unchanged (research drew on external primary sources only — official
+  `curl_cffi`/`curl-impersonate`/`tls-client`/`httpx` PyPI+GitHub metadata, official
+  Cloudflare JA3/JA4 docs, `nba_api` GitHub issue tracker — none captured into `raw/`)
+- `wiki`: added `wiki/topics/tls-fingerprint-mitigation.md`; expanded
+  `wiki/operations/full-extraction-requirements.md`'s "Root cause" section to link it
+  instead of restating the alternatives inline
+- `indexes`: added a row for the new note to `indexes/coverage.md`
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: `nba_api` `stats/library/http.py` and `library/http.py`
+  (installed `.venv`, exact tag `v1.11.4`) remain authoritative; the new note's
+  third-party client claims are dated PyPI/GitHub metadata observations, not repo canon
+- `provenance`: new note carries its own full provenance table (14 sources); the parent
+  note's provenance table gains no new row, only the cross-link
+- `derived output`: none
+- `vault`: new note's frontmatter initialized (`kind: concept`, `status: active`,
+  `source_count: 14`); no shared `.obsidian/` surfaces touched
+- `path map`: none
+- `link/backlink impact`: one new wiki page with an inbound link from
+  `operations/full-extraction-requirements.md`'s "Root cause" and "Related notes"
+  sections; `indexes/coverage.md` gains the matching row
 - Summary: Spawned a background research agent to investigate mitigations for the
   `requests`/urllib3 TLS/HTTP2 fingerprint block diagnosed against `nba_api==1.11.4`'s
-  `NBAStatsHTTP` client (prior entry above). Findings captured in new
-  `wiki/topics/tls-fingerprint-mitigation.md`: primary-source evidence on JA3/JA4
+  `NBAStatsHTTP` client (prior entry above). Findings: primary-source evidence on JA3/JA4
   fingerprinting, a ranked comparison of `curl_cffi`, `curl-impersonate`, `tls-client`,
   `httpx`, and other candidates against nbadb's exact `_ThreadLocalSessionMixin`
   integration contract, and a recommended approach (`curl_cffi`'s
   `requests.Session(impersonate=...)` drop-in) with an implementation sketch — no code
   changed.
 - Companion source change: none (research-only; no repository behavior touched).
-- Cross-link: `wiki/operations/full-extraction-requirements.md`'s "Root cause" section
-  now links to the new note instead of restating the alternatives inline.
-- Coverage index: added row for the new note (`indexes/coverage.md`).
 - Risks / rollback: additive KB-only batch (one new file, two small edits to existing KB
   files); rollback is a straight revert.
 - Still open: the maintainer decision on which transport to adopt, and the actual

@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import signal
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -16,6 +17,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pytest
 
 from nbadb.core.config import NbaDbSettings
@@ -181,7 +183,11 @@ def test_sync_duckdb_keeps_downloaded_duckdb(tmp_path) -> None:
     sqlite_path = tmp_path / "nba.sqlite"
     duckdb_path = tmp_path / "nba.duckdb"
     sqlite_path.write_bytes(b"sqlite")
-    duckdb_path.write_bytes(b"fresh")
+    connection = duckdb.connect(str(duckdb_path))
+    try:
+        connection.execute("CREATE TABLE dim_bundle AS SELECT 1 AS one")
+    finally:
+        connection.close()
 
     with patch.object(KaggleClient, "_seed_duckdb_from_sqlite") as seed:
         KaggleClient._sync_duckdb_after_download(
@@ -189,7 +195,11 @@ def test_sync_duckdb_keeps_downloaded_duckdb(tmp_path) -> None:
             copied_names={"nba.sqlite", "nba.duckdb"},
         )
 
-    assert duckdb_path.read_bytes() == b"fresh"
+    kept = duckdb.connect(str(duckdb_path), read_only=True)
+    try:
+        assert kept.execute("SELECT count(*) FROM dim_bundle").fetchone()[0] == 1
+    finally:
+        kept.close()
     seed.assert_not_called()
 
 
@@ -204,6 +214,66 @@ def test_sync_duckdb_ignores_stale_local_sqlite_when_sqlite_not_downloaded(tmp_p
 
     assert duckdb_path.read_bytes() == b"current-duckdb"
     seed.assert_not_called()
+
+
+def test_sync_duckdb_replaces_empty_downloaded_duckdb_stub(tmp_path) -> None:
+    sqlite_path = tmp_path / "nba.sqlite"
+    duckdb_path = tmp_path / "nba.duckdb"
+    sqlite_path.write_bytes(b"sqlite")
+    connection = duckdb.connect(str(duckdb_path))
+    connection.close()
+
+    with patch.object(KaggleClient, "_seed_duckdb_from_sqlite") as seed:
+        KaggleClient._sync_duckdb_after_download(
+            tmp_path,
+            copied_names={"nba.sqlite", "nba.duckdb"},
+        )
+
+    assert not duckdb_path.exists()
+    seed.assert_called_once_with(sqlite_path, duckdb_path)
+
+
+def test_sync_duckdb_replaces_unreadable_downloaded_duckdb(tmp_path) -> None:
+    sqlite_path = tmp_path / "nba.sqlite"
+    duckdb_path = tmp_path / "nba.duckdb"
+    sqlite_path.write_bytes(b"sqlite")
+    duckdb_path.write_bytes(b"not-a-duckdb-file")
+
+    with patch.object(KaggleClient, "_seed_duckdb_from_sqlite") as seed:
+        KaggleClient._sync_duckdb_after_download(
+            tmp_path,
+            copied_names={"nba.sqlite", "nba.duckdb"},
+        )
+
+    assert not duckdb_path.exists()
+    seed.assert_called_once_with(sqlite_path, duckdb_path)
+
+
+def test_seed_duckdb_from_sqlite_imports_all_tables(tmp_path) -> None:
+    sqlite_path = tmp_path / "nba.sqlite"
+    duckdb_path = tmp_path / "nba.duckdb"
+    connection = sqlite3.connect(sqlite_path)
+    try:
+        connection.execute("CREATE TABLE dim_player (id INTEGER PRIMARY KEY, name TEXT)")
+        connection.execute("CREATE TABLE fact_game (game_id TEXT, pts INTEGER)")
+        connection.executemany("INSERT INTO dim_player VALUES (?, ?)", [(1, "a"), (2, "b")])
+        connection.executemany("INSERT INTO fact_game VALUES (?, ?)", [("g1", 10)])
+        connection.commit()
+    finally:
+        connection.close()
+
+    KaggleClient._seed_duckdb_from_sqlite(sqlite_path, duckdb_path)
+
+    seeded = duckdb.connect(str(duckdb_path), read_only=True)
+    try:
+        assert seeded.execute("SELECT count(*) FROM dim_player").fetchone()[0] == 2
+        assert seeded.execute("SELECT count(*) FROM fact_game").fetchone()[0] == 1
+        assert seeded.execute("SELECT name FROM dim_player ORDER BY id").fetchall() == [
+            ("a",),
+            ("b",),
+        ]
+    finally:
+        seeded.close()
 
 
 def test_ensure_metadata_fails_when_data_dir_is_missing(tmp_path) -> None:

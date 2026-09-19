@@ -1303,16 +1303,38 @@ class KaggleClient:
         }
 
     @staticmethod
-    def _sync_duckdb_after_download(dest: Path, *, copied_names: set[str]) -> None:
+    def _duckdb_has_user_tables(path: Path) -> bool:
+        """Return True when path opens as DuckDB and holds at least one user table."""
+
+        import duckdb
+
+        try:
+            conn = duckdb.connect(str(path), read_only=True)
+        except Exception:
+            return False
+        try:
+            row = conn.execute(
+                "SELECT count(*) FROM duckdb_tables() WHERE database_name = current_database()"
+            ).fetchone()
+        finally:
+            conn.close()
+        return row is not None and row[0] > 0
+
+    @classmethod
+    def _sync_duckdb_after_download(cls, dest: Path, *, copied_names: set[str]) -> None:
         """Ensure DuckDB reflects the freshly downloaded bundle."""
         duckdb_path = dest / "nba.duckdb"
         sqlite_path = dest / "nba.sqlite"
-        if "nba.duckdb" in copied_names or "nba.sqlite" not in copied_names:
+        if "nba.sqlite" not in copied_names:
+            return
+        if "nba.duckdb" in copied_names and cls._duckdb_has_user_tables(duckdb_path):
             return
         if duckdb_path.exists():
-            logger.info("Replacing stale local nba.duckdb from freshly downloaded nba.sqlite")
+            logger.info(
+                "Replacing empty or stale local nba.duckdb from freshly downloaded nba.sqlite"
+            )
             duckdb_path.unlink()
-        KaggleClient._seed_duckdb_from_sqlite(sqlite_path, duckdb_path)
+        cls._seed_duckdb_from_sqlite(sqlite_path, duckdb_path)
 
     @staticmethod
     def _seed_duckdb_from_sqlite(sqlite_path: Path, duckdb_path: Path) -> None:
@@ -1329,7 +1351,8 @@ class KaggleClient:
             tables = [
                 r[0]
                 for r in conn.execute(
-                    "SELECT name FROM sqlite_db.sqlite_master WHERE type='table'"
+                    "SELECT table_name FROM duckdb_tables() "
+                    "WHERE database_name = 'sqlite_db' ORDER BY table_name"
                 ).fetchall()
             ]
             total_rows = 0

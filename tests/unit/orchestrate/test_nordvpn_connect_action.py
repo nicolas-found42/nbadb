@@ -989,6 +989,30 @@ def test_nba_stack_probe_root_error_type_falls_back_without_leaking_content(
             "nba_stack_runtime_error",
             "stack_runtime_error",
         ),
+        # An empty canary is host-independent: it reproduces from a residential
+        # IP with no tunnel, so it must terminate rather than quarantine exits.
+        (
+            1,
+            {
+                "status": "failed",
+                "endpoint": "common_all_players",
+                "failure_kind": "empty",
+                "error_type": "ProbeContractError",
+            },
+            "nba_stack_contract_error",
+            "stack_contract_error",
+        ),
+        (
+            1,
+            {
+                "status": "failed",
+                "endpoint": "common_all_players",
+                "failure_kind": "contract_drift",
+                "error_type": "ProbeContractError",
+            },
+            "nba_stack_contract_error",
+            "stack_contract_error",
+        ),
         (
             0,
             {"status": "passed", "endpoints": {"common_all_players": {"rows": 1}}},

@@ -135,3 +135,52 @@ def test_probe_rejects_player_rows_without_positive_team_membership(monkeypatch)
         "failure_kind": "invalid_values",
         "error_type": "ProbeContractError",
     }
+
+
+def test_probe_reports_contract_drift_rather_than_empty(monkeypatch) -> None:
+    """Drift must not masquerade as emptiness at this seam.
+
+    Contract drift demotes a complete response to a lossless fallback, which the
+    runner consumes but this probe does not, so it arrives here as a zero-width
+    frame. Reporting that as ``empty`` is what let CI read a deterministic
+    contract bug as a VPN exit-IP block and quarantine eight servers per run.
+    """
+    module = _load_module()
+
+    class _Fallback:
+        reason_codes = ("reordered_header",)
+
+    class _DriftingExtractor:
+        endpoint_name = "common_all_players"
+
+        def lossless_fallback_snapshot(self):
+            return (_Fallback(),)
+
+    monkeypatch.setattr(module, "CommonAllPlayersExtractor", _DriftingExtractor)
+    monkeypatch.setattr(module, "_sync_extract", lambda extractor, **params: pl.DataFrame())
+
+    result = module.run_probe(request_timeout_seconds=3, season="2024-25")
+
+    assert result["status"] == "failed"
+    assert result["endpoint"] == "common_all_players"
+    assert result["failure_kind"] == "contract_drift"
+    assert result["error_type"] == "ProbeContractError"
+    assert result["detail"] == "reordered_header"
+
+
+def test_probe_still_reports_empty_when_no_fallback_was_produced(monkeypatch) -> None:
+    """A genuinely empty result set keeps the distinct ``empty`` kind."""
+    module = _load_module()
+
+    class _CleanExtractor:
+        endpoint_name = "common_all_players"
+
+        def lossless_fallback_snapshot(self):
+            return ()
+
+    monkeypatch.setattr(module, "CommonAllPlayersExtractor", _CleanExtractor)
+    monkeypatch.setattr(module, "_sync_extract", lambda extractor, **params: pl.DataFrame())
+
+    result = module.run_probe(request_timeout_seconds=3, season="2024-25")
+
+    assert result["failure_kind"] == "empty"

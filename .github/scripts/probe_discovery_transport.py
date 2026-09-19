@@ -24,6 +24,7 @@ def _failure(
     error_type: str,
     *,
     root_type: str | None = None,
+    detail: str | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "status": "failed",
@@ -33,6 +34,8 @@ def _failure(
     }
     if root_type is not None:
         payload["root_error_type"] = _safe_token(root_type, "ProbeFailed")
+    if detail is not None:
+        payload["detail"] = _safe_token(detail, "unknown")
     return payload
 
 
@@ -73,6 +76,22 @@ def run_probe(*, request_timeout_seconds: int, season: str) -> dict[str, object]
                 type(exc).__name__,
                 root_type=root_error_type(exc),
             )
+        # Contract drift demotes a complete response to a lossless fallback, which
+        # reaches this seam as a zero-width frame. The runner consumes those
+        # fallbacks, but this probe calls the extractor directly, so without this
+        # check drift is indistinguishable from a genuinely empty result set and
+        # gets misread as host rejection.
+        snapshot = getattr(extractor, "lossless_fallback_snapshot", None)
+        fallbacks = snapshot() if callable(snapshot) else ()
+        if fallbacks:
+            reasons = sorted({code for fb in fallbacks for code in fb.reason_codes})
+            return _failure(
+                endpoint,
+                "contract_drift",
+                "ProbeContractError",
+                detail=",".join(reasons) or "unknown",
+            )
+
         columns = frozenset(getattr(frame, "columns", ()))
         rows = getattr(frame, "height", None)
         if isinstance(rows, bool) or not isinstance(rows, int) or rows <= 0:

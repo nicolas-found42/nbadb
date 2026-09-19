@@ -107,7 +107,7 @@ NBA_STACK_PROBE_ERROR_TYPES: Final[frozenset[str]] = (
     | NBA_STACK_PROBE_RUNTIME_ERROR_TYPES
 )
 NBA_STACK_PROBE_FAILURE_KINDS: Final[frozenset[str]] = frozenset(
-    {"empty", "exception", "invalid_values", "missing_columns"}
+    {"contract_drift", "empty", "exception", "invalid_values", "missing_columns"}
 )
 MAX_RECOMMENDATION_POOL_SIZE: Final[int] = 200
 NBA_PROBE_HEADERS: Final[tuple[tuple[str, str], ...]] = (
@@ -1666,9 +1666,24 @@ class NordVpnConnectAction:
                 error_diagnostic = f"{error_diagnostic}; kind={failure_kind}"
             if root_error_type is not None:
                 error_diagnostic = f"{error_diagnostic}; root={root_error_type}"
+            # Emit only fields already reduced to a safe token or matched against
+            # a closed vocabulary. Dumping the raw child payload leaked whatever
+            # the child put in an unrecognized root_error_type straight into the
+            # run log, which is attacker- and accident-reachable content.
+            attestation = {
+                "status": "failed",
+                "endpoint": endpoint,
+                "failure_kind": failure_kind,
+                "error_type": error_type,
+            }
+            if root_error_type is not None:
+                attestation["root_error_type"] = root_error_type
+            raw_detail = payload.get("detail")
+            if raw_detail is not None:
+                attestation["detail"] = self._safe_stack_probe_token(raw_detail, "unknown")
             print(
                 "::warning::NBA discovery stack probe attestation: "
-                + json.dumps(payload, separators=(",", ":"))[:1000]
+                + json.dumps(attestation, separators=(",", ":"))[:1000]
             )
             self.nba_probe_diagnostic = (
                 f"NBA discovery stack probe failed at {endpoint} ({error_diagnostic})"
@@ -1681,18 +1696,17 @@ class NordVpnConnectAction:
                 self.nba_probe_status = "stack_transport_failed"
                 print(f"::warning::{self.nba_probe_diagnostic}")
                 return False
-            if failure_kind == "empty":
-                # NBA's edge soft-blocks flagged exit IPs with success-shaped empty
-                # result sets: the small commonteamyears probe passes while heavier
-                # player endpoints return zero rows. Identical code and params
-                # return full data from residential IPs, so this is host-rejection
-                # evidence, not a response-contract failure. Quarantine the host
-                # and let the bounded rotation try the next recommended server.
-                self.nba_probe_status = "stack_empty_rejection"
-                print(f"::warning::{self.nba_probe_diagnostic}")
-                return False
+            # An empty canary is NOT host-rejection evidence. The rotation this
+            # branch used to trigger was built on a misdiagnosis: commonallplayers
+            # permutes TEAM_CODE/TEAM_SLUG under IsOnlyCurrentSeason=1, which
+            # demoted a complete 582-row response to a lossless fallback and
+            # surfaced here as zero rows. That reproduces from a residential IP
+            # with no tunnel at all, so quarantining exits burned the whole server
+            # budget on a deterministic contract bug. Empty and drift are both
+            # host-independent and terminate fail-closed; only transport
+            # exceptions rotate.
             if (
-                failure_kind in {"invalid_values", "missing_columns"}
+                failure_kind in {"contract_drift", "empty", "invalid_values", "missing_columns"}
                 or classification_error_type in NBA_STACK_PROBE_CONTRACT_ERROR_TYPES
             ):
                 self.nba_probe_status = "stack_contract_error"

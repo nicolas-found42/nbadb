@@ -230,3 +230,17 @@ These DuckDB tables track pipeline state — do not modify directly:
 - **scan assurance gate**: use `nbadb scan --fail-on error` for hard assurance; `run-quality` is deprecated and no longer the gate
 - **`full` deprecated**: use `backfill` for targeted gap-filling instead
 - **CI**: All GitHub Actions are SHA-pinned, all workflows have permissions blocks, timeout-minutes, and concurrency groups
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked on this fork's GitHub Issues (`nicolas-found42/nbadb` via `gh`); `upstream` (`wyattowalsh/nbadb`) is the canonical source and never receives issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary — label strings equal to the role names. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

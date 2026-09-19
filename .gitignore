@@ -103,3 +103,6 @@ scripts/
 !chat/skills/**/scripts/
 !chat/skills/**/scripts/*.py
 .opencode/
+
+# local secrets
+nord-credentials.txt

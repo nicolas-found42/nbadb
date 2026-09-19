@@ -187,23 +187,54 @@ def test_agg_player_season_includes_team_id():
     conn.close()
 
 
-_ALL_TIME_ROW = tuple[int | None, str | None, int | None, int | None]
+_ALL_TIME_CATEGORIES = (
+    "pts",
+    "ast",
+    "reb",
+    "fgm",
+    "fga",
+    "fg_pct",
+    "fg3m",
+    "fg3a",
+    "fg3_pct",
+    "ftm",
+    "fta",
+    "ft_pct",
+    "oreb",
+    "dreb",
+    "blk",
+    "stl",
+    "tov",
+    "pf",
+    "gp",
+)
+
+_ALL_TIME_PCT_CATEGORIES = frozenset({"fg_pct", "fg3_pct", "ft_pct"})
+
+_ALL_TIME_ROW = tuple[int | None, str | None, float | None, int | None]
 
 
 def _all_time_frame(
     stat: str,
     rows: list[_ALL_TIME_ROW],
 ) -> pl.DataFrame:
+    value_dtype = pl.Float64 if stat in _ALL_TIME_PCT_CATEGORIES else pl.Int64
     return pl.DataFrame(
         rows,
         schema={
             "player_id": pl.Int64,
             "player_name": pl.String,
-            stat: pl.Int64,
+            stat: value_dtype,
             f"{stat}_rank": pl.Int64,
         },
         orient="row",
     )
+
+
+def _all_time_value(category: str, index: int) -> int | float:
+    if category in _ALL_TIME_PCT_CATEGORIES:
+        return round(0.3 + index * 0.01, 3)
+    return 1000 + index
 
 
 def _run_all_time_leaders(
@@ -216,7 +247,7 @@ def _run_all_time_leaders(
     conn = duckdb.connect()
     try:
         staging: dict[str, pl.LazyFrame] = {}
-        for stat in ("pts", "ast", "reb"):
+        for stat in _ALL_TIME_CATEGORIES:
             frame = _all_time_frame(stat, rows_by_source.get(stat, []))
             table_name = f"stg_all_time_{stat}"
             conn.register(table_name, frame)
@@ -228,15 +259,23 @@ def _run_all_time_leaders(
         conn.close()
 
 
+def _all_time_row(player_id: int | None, player_name: str | None, **overrides: int | float) -> dict:
+    """Build a full 40-column expected row with unset stat/rank fields as None."""
+    row: dict = {"player_id": player_id, "player_name": player_name}
+    for category in _ALL_TIME_CATEGORIES:
+        row[category] = overrides.get(category)
+    for category in _ALL_TIME_CATEGORIES:
+        row[f"{category}_rank"] = overrides.get(f"{category}_rank")
+    return row
+
+
 def test_agg_all_time_leaders_uses_only_representable_sources_and_projection() -> None:
     from nbadb.transform.derived.agg_all_time_leaders import (
         AggAllTimeLeadersTransformer,
     )
 
     assert AggAllTimeLeadersTransformer.depends_on == [
-        "stg_all_time_pts",
-        "stg_all_time_ast",
-        "stg_all_time_reb",
+        f"stg_all_time_{category}" for category in _ALL_TIME_CATEGORIES
     ]
     normalized_sql = " ".join(AggAllTimeLeadersTransformer._SQL.lower().split())
     assert "select *" not in normalized_sql
@@ -248,39 +287,30 @@ def test_agg_all_time_leaders_uses_only_representable_sources_and_projection() -
     assert referenced_all_time_sources == set(AggAllTimeLeadersTransformer.depends_on)
 
 
-def test_agg_all_time_leaders_consolidates_three_categories_at_player_grain() -> None:
+def test_agg_all_time_leaders_consolidates_nineteen_categories_at_player_grain() -> None:
     from nbadb.schemas.star.agg_schemas import AggAllTimeLeadersSchema
 
-    result = _run_all_time_leaders(
-        {
-            "pts": [(2544, "LeBron James", 40000, 1)],
-            "ast": [(2544, "LeBron James", 11000, 2)],
-            "reb": [(2544, "LeBron James", 11500, 3)],
-        }
-    )
+    rows_by_source = {
+        category: [(2544, "LeBron James", _all_time_value(category, index), index + 1)]
+        for index, category in enumerate(_ALL_TIME_CATEGORIES)
+    }
+    result = _run_all_time_leaders(rows_by_source)
 
-    assert result.columns == [
-        "player_id",
-        "player_name",
-        "pts",
-        "ast",
-        "reb",
-        "pts_rank",
-        "ast_rank",
-        "reb_rank",
-    ]
-    assert result.to_dicts() == [
-        {
-            "player_id": 2544,
-            "player_name": "LeBron James",
-            "pts": 40000,
-            "ast": 11000,
-            "reb": 11500,
-            "pts_rank": 1,
-            "ast_rank": 2,
-            "reb_rank": 3,
-        }
-    ]
+    expected_columns = (
+        ["player_id", "player_name"]
+        + list(_ALL_TIME_CATEGORIES)
+        + [f"{category}_rank" for category in _ALL_TIME_CATEGORIES]
+    )
+    assert result.columns == expected_columns
+
+    overrides = {
+        category: _all_time_value(category, index)
+        for index, category in enumerate(_ALL_TIME_CATEGORIES)
+    }
+    overrides.update(
+        {f"{category}_rank": index + 1 for index, category in enumerate(_ALL_TIME_CATEGORIES)}
+    )
+    assert result.to_dicts() == [_all_time_row(2544, "LeBron James", **overrides)]
     assert result.unique(subset=["player_id"]).height == result.height
     assert AggAllTimeLeadersSchema.validate(result).to_dicts() == result.to_dicts()
     assert list(AggAllTimeLeadersSchema.to_schema().columns) == result.columns
@@ -296,36 +326,9 @@ def test_agg_all_time_leaders_full_outer_join_preserves_disjoint_membership() ->
     )
 
     assert result.to_dicts() == [
-        {
-            "player_id": 1,
-            "player_name": "Points",
-            "pts": 100,
-            "ast": None,
-            "reb": None,
-            "pts_rank": 1,
-            "ast_rank": None,
-            "reb_rank": None,
-        },
-        {
-            "player_id": 2,
-            "player_name": "Assists",
-            "pts": None,
-            "ast": 80,
-            "reb": None,
-            "pts_rank": None,
-            "ast_rank": 2,
-            "reb_rank": None,
-        },
-        {
-            "player_id": 3,
-            "player_name": "Rebounds",
-            "pts": None,
-            "ast": None,
-            "reb": 70,
-            "pts_rank": None,
-            "ast_rank": None,
-            "reb_rank": 3,
-        },
+        _all_time_row(1, "Points", pts=100, pts_rank=1),
+        _all_time_row(2, "Assists", ast=80, ast_rank=2),
+        _all_time_row(3, "Rebounds", reb=70, reb_rank=3),
     ]
 
 
@@ -341,18 +344,7 @@ def test_agg_all_time_leaders_exact_duplicates_and_null_plus_known_are_idempoten
         }
     )
 
-    assert result.to_dicts() == [
-        {
-            "player_id": 1,
-            "player_name": "Known",
-            "pts": 100,
-            "ast": None,
-            "reb": None,
-            "pts_rank": 1,
-            "ast_rank": None,
-            "reb_rank": None,
-        }
-    ]
+    assert result.to_dicts() == [_all_time_row(1, "Known", pts=100, pts_rank=1)]
 
 
 def test_agg_all_time_leaders_all_null_name_is_preserved_as_null() -> None:
@@ -376,6 +368,8 @@ def test_agg_all_time_leaders_all_null_name_is_preserved_as_null() -> None:
         ("ast", [(1, "Known", 80, 1), (1, "Known", 80, 2)], "assists ranks"),
         ("reb", [(1, "Known", 70, 1), (1, "Known", 71, 1)], "rebounds values"),
         ("reb", [(1, "Known", 70, 1), (1, "Known", 70, 2)], "rebounds ranks"),
+        ("gp", [(1, "Known", 70, 1), (1, "Known", 71, 1)], "games played values"),
+        ("fg_pct", [(1, "Known", 70, 1), (1, "Known", 71, 1)], "field goal percentage values"),
     ],
 )
 def test_agg_all_time_leaders_conflicting_metric_or_rank_fails_closed(
@@ -397,7 +391,7 @@ def test_agg_all_time_leaders_conflicting_name_across_sources_fails_closed() -> 
         )
 
 
-@pytest.mark.parametrize("source", ["pts", "ast", "reb"])
+@pytest.mark.parametrize("source", ["pts", "ast", "reb", "gp"])
 def test_agg_all_time_leaders_null_player_id_fails_closed(source: str) -> None:
     with pytest.raises(duckdb.Error, match="null player_id"):
         _run_all_time_leaders({source: [(None, "Unknown", 1, 1)]})

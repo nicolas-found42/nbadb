@@ -25,6 +25,48 @@ class AggAllTimeLeadersSchema(BaseSchema):
     reb: int | None = pa.Field(
         nullable=True, ge=0, metadata={"description": "Career total rebounds"}
     )
+    fgm: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career field goals made"}
+    )
+    fga: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career field goals attempted"}
+    )
+    fg_pct: float | None = pa.Field(
+        nullable=True, ge=0.0, le=1.0, metadata={"description": "Career field goal percentage"}
+    )
+    fg3m: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career three-pointers made"}
+    )
+    fg3a: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career three-pointers attempted"}
+    )
+    fg3_pct: float | None = pa.Field(
+        nullable=True, ge=0.0, le=1.0, metadata={"description": "Career three-point percentage"}
+    )
+    ftm: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career free throws made"}
+    )
+    fta: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career free throws attempted"}
+    )
+    ft_pct: float | None = pa.Field(
+        nullable=True, ge=0.0, le=1.0, metadata={"description": "Career free throw percentage"}
+    )
+    oreb: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career offensive rebounds"}
+    )
+    dreb: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career defensive rebounds"}
+    )
+    blk: int | None = pa.Field(nullable=True, ge=0, metadata={"description": "Career total blocks"})
+    stl: int | None = pa.Field(nullable=True, ge=0, metadata={"description": "Career total steals"})
+    tov: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career total turnovers"}
+    )
+    pf: int | None = pa.Field(
+        nullable=True, ge=0, metadata={"description": "Career total personal fouls"}
+    )
+    gp: int | None = pa.Field(nullable=True, ge=0, metadata={"description": "Career games played"})
     pts_rank: int | None = pa.Field(
         nullable=True, ge=1, metadata={"description": "All-time points rank"}
     )
@@ -33,6 +75,54 @@ class AggAllTimeLeadersSchema(BaseSchema):
     )
     reb_rank: int | None = pa.Field(
         nullable=True, ge=1, metadata={"description": "All-time rebounds rank"}
+    )
+    fgm_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time field goals made rank"}
+    )
+    fga_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time field goals attempted rank"}
+    )
+    fg_pct_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time field goal percentage rank"}
+    )
+    fg3m_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time three-pointers made rank"}
+    )
+    fg3a_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time three-pointers attempted rank"}
+    )
+    fg3_pct_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time three-point percentage rank"}
+    )
+    ftm_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time free throws made rank"}
+    )
+    fta_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time free throws attempted rank"}
+    )
+    ft_pct_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time free throw percentage rank"}
+    )
+    oreb_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time offensive rebounds rank"}
+    )
+    dreb_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time defensive rebounds rank"}
+    )
+    blk_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time blocks rank"}
+    )
+    stl_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time steals rank"}
+    )
+    tov_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time turnovers rank"}
+    )
+    pf_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time personal fouls rank"}
+    )
+    gp_rank: int | None = pa.Field(
+        nullable=True, ge=1, metadata={"description": "All-time games played rank"}
     )
 
 

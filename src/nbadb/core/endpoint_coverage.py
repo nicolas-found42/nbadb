@@ -344,6 +344,51 @@ _MODEL_OWNERSHIP_STAGING_KEYS: dict[str, _ModelOwnershipDecision] = {
             "surface; team dimensions use static team, TeamDetails, and TeamInfoCommon metadata."
         ),
     },
+    "stg_team_and_players_vs_players_team_off": {
+        "status": "compatibility_reference_only",
+        "reason": (
+            "Duplicate TeamOff packet from the team_and_players_vs_players extractor-only "
+            "alias is retained as a compatibility/reference surface; the identical result set "
+            "from the canonical team_and_players_vs endpoint is already modeled via "
+            "stg_tapvp_team_off/fact_team_matchups_detail."
+        ),
+    },
+    "stg_team_and_players_vs_players_team_on": {
+        "status": "compatibility_reference_only",
+        "reason": (
+            "Duplicate TeamOn packet from the team_and_players_vs_players extractor-only "
+            "alias is retained as a compatibility/reference surface; the identical result set "
+            "from the canonical team_and_players_vs endpoint is already modeled via "
+            "stg_tapvp_team_on/fact_team_matchups_detail."
+        ),
+    },
+    "stg_team_and_players_vs_players_team_vs": {
+        "status": "compatibility_reference_only",
+        "reason": (
+            "Duplicate TeamVs packet from the team_and_players_vs_players extractor-only "
+            "alias is retained as a compatibility/reference surface; the identical result set "
+            "from the canonical team_and_players_vs endpoint is already modeled via "
+            "stg_tapvp_team_vs/fact_team_matchups_detail."
+        ),
+    },
+    "stg_team_and_players_vs_players_team_vs_off": {
+        "status": "compatibility_reference_only",
+        "reason": (
+            "Duplicate TeamVsOff packet from the team_and_players_vs_players extractor-only "
+            "alias is retained as a compatibility/reference surface; the identical result set "
+            "from the canonical team_and_players_vs endpoint is already modeled via "
+            "stg_tapvp_team_vs_off/fact_team_matchups_detail."
+        ),
+    },
+    "stg_all_time": {
+        "status": "compatibility_reference_only",
+        "reason": (
+            "Legacy pre-suffix alias of AllTimeLeadersGrids result set 0 (schemas/registry.py "
+            "maps it onto StagingAllTimeAstSchema) is retained as a compatibility/reference "
+            "surface; the same data is already modeled via stg_all_time_ast/"
+            "agg_all_time_leaders."
+        ),
+    },
 }
 
 _FIELD_REFERENCE_ONLY_STAGING_KEYS = {

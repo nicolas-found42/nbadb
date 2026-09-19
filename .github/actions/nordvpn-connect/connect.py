@@ -1662,8 +1662,14 @@ class NordVpnConnectAction:
                 raise ActionError("nba_stack_invalid_attestation", self.nba_probe_diagnostic)
 
             error_diagnostic = error_type
+            if failure_kind != "exception":
+                error_diagnostic = f"{error_diagnostic}; kind={failure_kind}"
             if root_error_type is not None:
-                error_diagnostic = f"{error_type}; root={root_error_type}"
+                error_diagnostic = f"{error_diagnostic}; root={root_error_type}"
+            print(
+                "::warning::NBA discovery stack probe attestation: "
+                + json.dumps(payload, separators=(",", ":"))[:1000]
+            )
             self.nba_probe_diagnostic = (
                 f"NBA discovery stack probe failed at {endpoint} ({error_diagnostic})"
             )[:NBA_STACK_PROBE_DIAGNOSTIC_MAX_CHARS]

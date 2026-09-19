@@ -498,3 +498,40 @@
   with a different mitigation); the KB edits revert independently.
 - Still open: live confirmation through the CI VPN lane (local runs cannot reach
   `stats.nba.com` from this network); then the full-extraction dispatch itself.
+
+### [2026-09-19 18:30] Preflight canary: header-permutation root cause, empty-rejection revert
+- Mode: enrich
+- Summary: The preflight discovery canary's `failure_kind=empty` was not a VPN exit-IP
+  soft block but a `commonallplayers` header permutation demoting a complete 582-row
+  response to a lossless fallback; fixed at the contract boundary, reverted the
+  server-rotation misdiagnosis, and recorded the wider pinned-contract staleness.
+- `raw`: none
+- `wiki`: `wiki/operations/full-extraction-requirements.md` (new root-cause section,
+  pinned-contract staleness sweep, corpus-rebind procedure, six provenance rows)
+- `indexes`: `indexes/coverage.md` (row refreshed for the note above)
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged
+- `provenance`: run `35469167028` preflight log, local residential-IP repro, a 24-endpoint
+  live drift sweep, and the `swar/nba_api` `v1.11.4` clone (HEAD `e0295f83`) are all
+  linked in the note's provenance table
+- `derived output`: none
+- `vault`: no frontmatter/alias/embed changes; no shared `.obsidian/` surfaces touched
+- Companion source change: `src/nbadb/extract/nba_api_adapter.py` (permutation admitted in
+  `_strict_stats_packets`), `.github/scripts/probe_discovery_transport.py`
+  (`contract_drift` kind), `.github/actions/nordvpn-connect/connect.py` (revert `f2ba74a`;
+  sanitize the `63f1559` attestation dump, which was leaking unrecognized
+  `root_error_type` content into run logs), plus the three test files and a star semantic
+  corpus rebind (five of seven pins moved).
+- `link/backlink impact`: none; section added inside an existing note
+- Risks / rollback: reverting the adapter commit restores strict positional header
+  matching and re-breaks the canary; the KB edits revert independently.
+- Follow-up:
+  - [ ] Decide the contract authority for columns NBA serves but nba_api does not
+        document (`player_game_logs`, `player_index`, `all_time_leaders_grids`,
+        `draft_history`) — deferred, not closed.
+  - [ ] `NBA_STACK_PROBE_DEFAULT_SEASON` is pinned to `2024-25` while `current_season()`
+        is `2025-26`; the canary passes either way but returns a degenerate 136 rows on
+        the stale season.
+  - [ ] Six pre-existing `tests/unit/contracts` failures confirmed unrelated to this work
+        (identical on the pre-change tree); still unidentified.

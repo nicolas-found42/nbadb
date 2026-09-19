@@ -257,6 +257,96 @@ primary-source evidence, ranked alternatives, and the maintainer decisions this 
 are gathered in [[../topics/tls-fingerprint-mitigation|TLS Fingerprint Mitigation for
 the NBA Stats API]] — see open questions below.
 
+## Root cause: a header permutation, not a VPN block — the empty-canary misdiagnosis
+
+**Diagnosed 2026-09-19, run `35469167028`.** After the transport swap fixed the
+fingerprint block above, `preflight` still failed. The canary reported
+`failure_kind: "empty"` at `common_all_players` on eight consecutive NordVPN exits, each
+one quarantined and rotated away by `f2ba74a`, until the server budget was exhausted and
+the job failed closed. The apparent pattern — light `commonteamyears` probe passes,
+heavier `commonallplayers` returns zero rows, every exit behaves identically — read as
+NBA soft-blocking flagged exit IPs with success-shaped empty result sets.
+
+**That reading was wrong.** The failure reproduces on a residential IP with no tunnel at
+all, in about one second:
+
+```
+raw provider rows      : 582
+extractor rows x width : 0 x 0
+fallback reason_codes  : ('reordered_header',)
+```
+
+NBA returns `commonallplayers` headers in a different order depending on the request:
+`TEAM_CODE` and `TEAM_SLUG` are transposed at indexes 12/13 under
+`IsOnlyCurrentSeason=1` versus `=0`. Same sixteen columns, same names, two positions
+swapped. `_strict_stats_packets` compared headers positionally, so the permuted response
+was demoted to a lossless fallback, which reaches callers as a zero-width frame. The
+probe read `height == 0` and called it empty.
+
+The earlier "local proof" that the stack returned 5,224 rows was itself misleading: it
+passed `params={...}` into `_sync_extract(extractor, **kwargs)`, so everything collapsed
+into a single key named `params` and the call silently ran with defaults
+(`is_only_current_season=0`, no season). 5,224 is the all-time player count. The probe's
+real call was never exercised.
+
+**Three consequences, all now fixed:**
+
+- A pure permutation is admitted at the contract boundary. It carries the same closed
+  column set under the same unique names, and downstream conversion addresses every
+  column by name, so the wide frame is canonicalized to the pinned order while the
+  receipt keeps the observed order. Anything other than a permutation still falls back.
+- The probe reports `failure_kind=contract_drift` when a lossless fallback was produced,
+  so drift can never again present as emptiness at that seam.
+- `empty` is terminal again. It is host-independent evidence, so rotating servers on it
+  burns the budget and hides a contract signal. Only transport exceptions rotate.
+
+### Pinned contracts are stale against live NBA, and upstream cannot currently fix it
+
+A sweep of the 24 endpoints callable without required IDs (2026-09-19, 36 live calls)
+found nine drifting responses: one `reordered_header` (above) and eight
+`additive_header`. NBA has added columns that the pinned contract does not carry:
+
+| Endpoint | Added column(s) |
+|---|---|
+| `player_game_logs`, `player_game_logs_v2` | `NICKNAME`, `WNBA_FANTASY_PTS`, `FP_HIGH_SCORE`, `WNBA_FANTASY_PTS_RANK`, `FP_HIGH_SCORE_RANK`, `AVAILABLE_FLAG`, `MIN_SEC`, `TEAM_COUNT` |
+| `all_time_leaders_grids` | `IS_ACTIVE_FLAG`, on all 19 result sets |
+| `player_index` | `SUPPLEMENTAL_STATUS` |
+| `draft_history` | `PLAYER_PROFILE_FLAG` |
+
+These still reach the runner as `lossless_drift`: raw bytes are preserved, but the
+modeled wide table comes out empty. They do not block `preflight`, whose canary uses only
+`common_all_players` and `league_game_log`.
+
+**Re-pinning is blocked upstream.** The pin is generated from nba_api's own docs at the
+tag of the installed version, and `nba-api==1.11.4` is the latest release. Cloning
+`v1.11.4` (HEAD `e0295f83`, matching the pinned SHA) shows the generator's authority,
+`docs/nba_api/stats/endpoints/*.md`, documents none of these columns. `IS_ACTIVE_FLAG`
+and `PLAYER_PROFILE_FLAG` appear only in `docs/nba_api/stats/endpoints_output/*.md`
+sample tables, which the generator does not ingest; `SUPPLEMENTAL_STATUS` and the
+`PlayerGameLogs` additions appear nowhere upstream. Closing this needs a deliberate
+decision about contract authority — ingesting the observed-output tables, adding a
+provenance-carrying local override, or upstreaming a PR to `swar/nba_api` — and was
+deferred rather than invented under schedule pressure.
+
+### Rebinding the star semantic corpora after any source change
+
+Changing bound bytes under `src/nbadb/` invalidates the star semantic decision corpora,
+which fail with `StarSemanticCorpusRebindError: current <label> authority drifted`. The
+maintenance path is the module's own rebind contract
+(`src/nbadb/contracts/rebind_star_semantic_decision_corpora.py`):
+
+1. Re-derive the seven `_CURRENT_*_SHA256` pins by replaying `_compile_current_authorities()`
+   (census, structural, candidate-source, stable, and the `dim_season_phase` candidate,
+   disposition-semantic and authority digests) and update them in place.
+2. Run `write_rebound_star_semantic_decision_corpora()` to regenerate both corpus JSONs.
+3. Re-run `tests/unit/contracts/test_star_semantic_review_packet.py` and
+   `test_rebind_star_semantic_decision_corpora.py` before committing. They prove two
+   fresh rebinds are byte-identical, so a re-run after an accidental source change must
+   reproduce the same bytes.
+
+Not every pin moves. The adapter fix above moved five of seven; the structural and
+season-phase candidate digests were unchanged.
+
 ## Related notes
 
 - [[../topics/full-extraction-control-plane|Full Extraction Control Plane]] — what the
@@ -289,3 +379,9 @@ the NBA Stats API]] — see open questions below.
 | plan-gate two-gate contract (support-matrix allowlist, adequacy scorecard) | `.github/workflows/full-extraction.yml:466-563`, `ci.yml:471-474` | line-anchored, read 2026-09-19 |
 | `transform_contract_missing` misclassification and fix | `src/nbadb/core/endpoint_coverage.py` (`_MODEL_OWNERSHIP_STATS_ENDPOINTS`, gap logic ~2202-2206, ~2661-2674); run `35428089035`, 2026-09-19 | fixed same day; local repro verified `gap_breakdown={}`, `contract_gap_endpoint_count=0` |
 | `requests`/urllib3 TLS-fingerprint block vs curl; interleaved A/B isolation | Dedicated `Debug NBA Probe` workflow, runs `35431455179`, `35431814071`, `35432038960`, `35432041682`, `35432609487`, `35432932592`, `35433170984`, 2026-09-19; `nba_api/stats/library/http.py:31-58` (exact client path) | dated runtime observation; diagnostic scripts deleted after use, evidence retained here |
+| header permutation root cause; `reordered_header` -> lossless fallback -> zero-width frame | `src/nbadb/extract/nba_api_adapter.py` (`_strict_stats_packets`, `_header_anomalies`), `src/nbadb/extract/base.py:1053`; run `35469167028` preflight log; local repro 2026-09-19 | dated runtime observation; repro is residential-IP, no tunnel, ~1s |
+| `commonallplayers` TEAM_CODE/TEAM_SLUG transposition under `IsOnlyCurrentSeason=1` | live `nba_api` calls, both flag values, 2026-09-19 | dated runtime observation; volatile provider behaviour |
+| eight exits quarantined then budget exhausted | run `35469167028`, `FAILED_SERVERS_JSON` in preflight job log | line-anchored to run log |
+| endpoint drift sweep: 24 endpoints, 36 calls, 9 drifting | live sweep 2026-09-19, results in session scratch | dated runtime observation; rerun to refresh |
+| upstream docs lack the added columns at `v1.11.4` | `swar/nba_api` clone at tag `v1.11.4`, HEAD `e0295f83`, `docs/nba_api/stats/endpoints/` vs `endpoints_output/`, read 2026-09-19 | matches `NBA_API_UPSTREAM_COMMIT`; freshness trigger on any nba-api bump |
+| corpus rebind procedure and which pins move | `src/nbadb/contracts/rebind_star_semantic_decision_corpora.py` docstring and `_compile_current_authorities`; applied 2026-09-19 | maintainer contract; verified by the two rebind test files |

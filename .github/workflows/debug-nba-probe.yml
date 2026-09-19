@@ -1,7 +1,12 @@
 name: Debug NBA Probe
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      season:
+        description: Season to probe (e.g. 2024-25)
+        required: false
+        default: "2024-25"
 
 permissions:
   contents: read
@@ -9,7 +14,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -34,6 +39,8 @@ jobs:
           nba-stack-probe-enabled: "false"
 
       - name: Diagnose CommonAllPlayers contract
+        env:
+          DEBUG_SEASON: ${{ inputs.season }}
         run: uv run python .github/scripts/debug_common_all_players.py
 
       - name: Disconnect NordVPN

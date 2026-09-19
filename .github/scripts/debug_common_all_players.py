@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 
 import polars as pl
@@ -9,25 +10,40 @@ from nbadb.orchestrate.extractor_runner import _sync_extract
 from nbadb.orchestrate.seasons import current_season
 
 
-def _describe(label: str, season: str, timeout: int) -> None:
-    print(f"--- {label}: season={season!r} timeout={timeout} ---", flush=True)
-    started = time.monotonic()
-    try:
-        frame: pl.DataFrame = _sync_extract(
-            CommonAllPlayersExtractor(),
-            season=season,
-            is_only_current_season=1,
-            allow_static_fallback=False,
-            timeout=timeout,
-        )
-    except Exception as exc:  # noqa: BLE001
-        elapsed = time.monotonic() - started
-        print(f"EXCEPTION after {elapsed:.1f}s: {type(exc).__name__}: {exc}", flush=True)
-        return
-    elapsed = time.monotonic() - started
-    print(
-        f"OK after {elapsed:.1f}s rows={frame.height} columns={sorted(frame.columns)}", flush=True
+def _attempt(season: str, timeout: int) -> pl.DataFrame:
+    return _sync_extract(
+        CommonAllPlayersExtractor(),
+        season=season,
+        is_only_current_season=1,
+        allow_static_fallback=False,
+        timeout=timeout,
     )
+
+
+def _describe(season: str, timeout: int, attempts: int) -> None:
+    print(f"--- season={season!r} timeout={timeout} max_attempts={attempts} ---", flush=True)
+    frame: pl.DataFrame | None = None
+    for attempt in range(1, attempts + 1):
+        started = time.monotonic()
+        try:
+            frame = _attempt(season, timeout)
+        except Exception as exc:  # noqa: BLE001
+            elapsed = time.monotonic() - started
+            print(
+                f"attempt {attempt}/{attempts} EXCEPTION after {elapsed:.1f}s: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            if attempt < attempts:
+                time.sleep(5)
+            continue
+        elapsed = time.monotonic() - started
+        print(f"attempt {attempt}/{attempts} OK after {elapsed:.1f}s", flush=True)
+        break
+    if frame is None:
+        print("ALL ATTEMPTS FAILED", flush=True)
+        return
+    print(f"rows={frame.height} columns={sorted(frame.columns)}", flush=True)
     if frame.height == 0:
         print("EMPTY FRAME", flush=True)
         return
@@ -58,8 +74,8 @@ def _describe(label: str, season: str, timeout: int) -> None:
 def main() -> int:
     computed = current_season()
     print(f"current_season() -> {computed!r}", flush=True)
-    _describe("hardcoded-default-60s", "2024-25", 60)
-    _describe("dynamic-current-60s", computed, 60)
+    season = os.environ.get("DEBUG_SEASON") or "2024-25"
+    _describe(season, timeout=90, attempts=4)
     return 0
 
 

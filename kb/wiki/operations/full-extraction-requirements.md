@@ -459,6 +459,38 @@ two-level headers; the adapter's own `_fallback_headers` projects them to compos
 snake_case names (`corner_3_fgm`). Diff against that projection, not against the raw
 `headers` array.
 
+### The two largest lane blocks are both broken, for different reasons
+
+`video_details` and `video_details_asset` hold 156 lanes each -- 312 of the plan's 1,624,
+about 19% -- and they sort first in the extract matrix, so they are the first real work
+the chain attempts. Both fail as of 2026-09-19, and neither failure is contract drift.
+
+**`video_details`: upstream returns no JSON.** Three consecutive direct calls
+(`player_id=2544`, `team_id=1610612747`, season 2024-25, `context_measure=FGM`) returned
+HTTP 500 with a body that is not JSON at all -- `JSONDecodeError: Expecting value: line 1
+column 1`. Nothing on our side can pin around an empty body; this reads as NBA having
+retired the endpoint. Decide whether to retire its lanes rather than retry them 156 times
+per iteration.
+
+**`video_details_asset`: the response is fine, our parser is not.** The same call returns
+real data -- a 651-entry playlist -- but the extractor raises
+`ResponseContractError: unknown response result occurrence name is malformed`.
+
+Both endpoints are pinned with `parser_kind=legacy_result_sets` and an empty
+`result_sets`, so their responses route to the unknown-response preservation path. That
+handler expects the legacy list of named result sets and validates a `name` on each
+entry, but the live response is a nested mapping:
+
+```
+resultSets = {"Meta": {"videoUrls": [...]}, "playlist": [...]}
+```
+
+`Meta` and `playlist` carry no `name`, so the occurrence-name check
+(`nba_api_adapter.py:1808`) rejects the whole response. The adapter already implements a
+`custom_nested` parser kind for exactly this shape -- these endpoints are simply pinned to
+the wrong one. Because `parser_kind` comes from the generated contract, correcting it is
+another contract-authority question rather than a local edit.
+
 ### Rebinding the star semantic corpora after any source change
 
 Changing bound bytes under `src/nbadb/` invalidates the star semantic decision corpora,
@@ -530,3 +562,6 @@ season-phase candidate digests were unchanged.
 | truncated `download-artifact` pin killed all 256 extract lanes | run `35484551473` extract job logs (`Set up job`); `.github/workflows/full-extraction.yml` pin audit, 2026-09-19 | fixed in `a3d2cc5`; all twenty pins now identical |
 | `lane_control` resume missing `--operation-authority-path` | run `35484551473` lane_control log; `src/nbadb/orchestrate/full_extraction_control.py:9764` (`required=True`) | fixed in `53b6f2e`; line-anchored |
 | `checkpoint`/`merge`/`dispatch_next` skip when `lane_control` fails | run `35484551473` job outcomes; their `if:` requires `needs.lane_control.result == 'success'` | dated runtime observation; blast radius of partial lane failure still unknown |
+| `video_details` returns non-JSON behind HTTP 500 | three direct `nba_api` calls, 2026-09-19 | dated runtime observation; persistent, not transient |
+| `video_details_asset` returns a nested `resultSets` mapping our unknown-response path rejects | direct call (651-entry playlist) vs `src/nbadb/extract/nba_api_adapter.py:1808`; `parser_kind=legacy_result_sets`, `result_sets=[]` | dated runtime observation; `custom_nested` already exists for this shape |
+| the two video endpoints are 312 of 1,624 lanes and sort first in the matrix | lane manifest of run `35476517060` | derived from the manifest; recheck after any replan |

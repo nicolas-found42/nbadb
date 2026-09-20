@@ -535,3 +535,36 @@
         the stale season.
   - [ ] Six pre-existing `tests/unit/contracts` failures confirmed unrelated to this work
         (identical on the pre-change tree); still unidentified.
+
+### [2026-09-19 19:40] discovery_seed: local observation pin for undocumented provider columns
+- Mode: enrich
+- Summary: `discovery_seed` failed in run `35476517060` because `player_game_logs` (its
+  primary player/team source) and `player_index` (its fallback) were both zero-width from
+  `additive_header`; resolved with a dated local pin admitting only the columns NBA is
+  observed to serve that nba_api v1.11.4 does not document.
+- `raw`: none
+- `wiki`: `wiki/operations/full-extraction-requirements.md` (deferral reversed; pin
+  contract, optional-column semantics and freshness trigger documented; four provenance
+  rows)
+- `indexes`: unchanged (coverage row already points at this note)
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged
+- `provenance`: run `35476517060` discovery_seed log, local per-season header diffs, and a
+  post-pin 36-call sweep reporting zero drift
+- `derived output`: none
+- `vault`: no frontmatter/alias/embed changes; no shared `.obsidian/` surfaces touched
+- Companion source change: `src/nbadb/core/nba_api_observed_columns.py` (new),
+  `src/nbadb/extract/nba_api_adapter.py` (`_expected_result_sets` widens by the admitted
+  delta, resolved against the observed response),
+  `tests/unit/core/test_nba_api_observed_columns.py` (new), plus a second star semantic
+  corpus rebind (the same five pins moved again).
+- `link/backlink impact`: none
+- Risks / rollback: reverting the pin module and the `_expected_result_sets` change
+  restores the generated-contract-only behaviour and re-blocks `discovery_seed`. The pin
+  is additive-only and closed, so it cannot mask a removal or an unenumerated addition.
+- Follow-up:
+  - [ ] Re-derive the admitted-columns table on any `nba-api` upgrade and delete entries
+        upstream has caught up with; the guard test fails if one goes stale.
+  - [ ] Consider upstreaming the missing endpoint docs to `swar/nba_api` so the pin can
+        eventually be retired.

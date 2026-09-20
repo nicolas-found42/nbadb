@@ -313,20 +313,43 @@ found nine drifting responses: one `reordered_header` (above) and eight
 | `player_index` | `SUPPLEMENTAL_STATUS` |
 | `draft_history` | `PLAYER_PROFILE_FLAG` |
 
-These still reach the runner as `lossless_drift`: raw bytes are preserved, but the
-modeled wide table comes out empty. They do not block `preflight`, whose canary uses only
-`common_all_players` and `league_game_log`.
+These reached the runner as `lossless_drift`: raw bytes preserved, modeled wide table
+empty. They do not block `preflight`, whose canary uses only `common_all_players` and
+`league_game_log` — but they did block `discovery_seed` in run `35476517060`, because
+`player_game_logs` is its primary player/team source and `player_index` is the designated
+fallback, so both the primary and its backstop were zero-width.
 
-**Re-pinning is blocked upstream.** The pin is generated from nba_api's own docs at the
-tag of the installed version, and `nba-api==1.11.4` is the latest release. Cloning
+**Upstream cannot supply these columns.** The pin is generated from nba_api's own docs
+at the tag of the installed version, and `nba-api==1.11.4` is the latest release. Cloning
 `v1.11.4` (HEAD `e0295f83`, matching the pinned SHA) shows the generator's authority,
 `docs/nba_api/stats/endpoints/*.md`, documents none of these columns. `IS_ACTIVE_FLAG`
 and `PLAYER_PROFILE_FLAG` appear only in `docs/nba_api/stats/endpoints_output/*.md`
 sample tables, which the generator does not ingest; `SUPPLEMENTAL_STATUS` and the
-`PlayerGameLogs` additions appear nowhere upstream. Closing this needs a deliberate
-decision about contract authority — ingesting the observed-output tables, adding a
-provenance-carrying local override, or upstreaming a PR to `swar/nba_api` — and was
-deferred rather than invented under schedule pressure.
+`PlayerGameLogs` additions appear nowhere upstream. Bumping a version cannot fix this.
+
+**Resolved with a dated local observation pin.** `src/nbadb/core/nba_api_observed_columns.py`
+enumerates, per endpoint and result set, the columns NBA is observed to serve that
+upstream does not document, and `_expected_result_sets` widens the generated contract by
+exactly that delta. The pin is deliberately narrow:
+
+- *Additive only.* It can never remove, rename or reorder a generated column.
+- *Closed.* Anything beyond the generated pin plus the enumerated columns is still
+  `additive_header`, still fatal.
+- *Optional, not required.* NBA serves some admitted columns only for some requests:
+  `PlayerGameLogs` returns `FP_HIGH_SCORE` and `FP_HIGH_SCORE_RANK` for the current
+  season but not for historical ones, so only the admitted columns a given response
+  actually carries are added. Pinning them as always-required turns an ordinary
+  historical response into `removed_header`, which is how the first attempt failed.
+- *Order-free.* Only names are pinned; the permutation tolerance above absorbs ordering.
+
+**Freshness trigger: re-derive this table whenever `nba-api` is upgraded.** A release that
+documents one of these columns makes its entry redundant, and a stale entry would mask a
+genuine upstream removal. `admitted_result_set_columns` raises on a redundant entry, and
+`test_every_admitted_entry_is_still_absent_from_the_generated_contract` fails when the
+generated contract catches up.
+
+After the pin, a re-run of the same 24-endpoint sweep reports zero drifting responses
+across 36 calls, down from nine.
 
 ### Rebinding the star semantic corpora after any source change
 
@@ -385,3 +408,7 @@ season-phase candidate digests were unchanged.
 | endpoint drift sweep: 24 endpoints, 36 calls, 9 drifting | live sweep 2026-09-19, results in session scratch | dated runtime observation; rerun to refresh |
 | upstream docs lack the added columns at `v1.11.4` | `swar/nba_api` clone at tag `v1.11.4`, HEAD `e0295f83`, `docs/nba_api/stats/endpoints/` vs `endpoints_output/`, read 2026-09-19 | matches `NBA_API_UPSTREAM_COMMIT`; freshness trigger on any nba-api bump |
 | corpus rebind procedure and which pins move | `src/nbadb/contracts/rebind_star_semantic_decision_corpora.py` docstring and `_compile_current_authorities`; applied 2026-09-19 | maintainer contract; verified by the two rebind test files |
+| local observation pin for undocumented provider columns | `src/nbadb/core/nba_api_observed_columns.py`; live header diffs against `pinned_endpoint_contract(...)`, 2026-09-19 | dated runtime observation; freshness trigger on any `nba-api` upgrade, guarded by a test |
+| `FP_HIGH_SCORE`/`FP_HIGH_SCORE_RANK` are current-season-only on `PlayerGameLogs` | live calls for 2005-06, 2015-16, 2024-25, 2025-26, 2026-09-19 | dated runtime observation; motivates optional-not-required admission |
+| `discovery_seed` depends on `player_game_logs` and falls back to `player_index` | `src/nbadb/orchestrate/discovery.py:1399, 1240`; run `35476517060` job log | line-anchored, read 2026-09-19 |
+| post-pin sweep: 36 calls, zero drift | live sweep 2026-09-19 after the pin | dated runtime observation; rerun to refresh |

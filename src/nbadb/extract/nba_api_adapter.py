@@ -45,6 +45,7 @@ from nbadb.core.nba_api_contract import (
     NbaApiResponseModeContract,
     structured_data_set_columns,
 )
+from nbadb.core.nba_api_observed_columns import admitted_result_set_columns
 from nbadb.core.nba_api_provenance import expected_nba_api_provider_authority
 from nbadb.core.nba_api_request_surface import (
     NbaApiRequestSurfaceError,
@@ -1967,9 +1968,16 @@ def _resolve_endpoint_contract(
 def _expected_result_sets(
     contract: NbaApiEndpointContract,
     endpoint_slug: str,
+    provider_sets: Sequence[tuple[str, object, object]],
 ) -> list[tuple[str, tuple[str, ...]]]:
     if contract.endpoint_slug != endpoint_slug:
         raise ResponseContractError("provider response slug differs from pinned nbadb authority")
+    observed_by_name: dict[str, set[str]] = {}
+    for provider_name, raw_headers, _raw_rows in provider_sets:
+        names, _values = _fallback_headers(raw_headers)
+        observed_by_name.setdefault(provider_name, set()).update(
+            name for name in names if isinstance(name, str)
+        )
     expected: list[tuple[str, tuple[str, ...]]] = []
     for result_set in contract.result_sets:
         name = result_set.result_set_name
@@ -1978,6 +1986,20 @@ def _expected_result_sets(
         headers = result_set.expected_columns
         if len(set(headers)) != len(headers):
             raise ResponseContractError("pinned nbadb contract contains duplicate columns")
+        # The generated contract is only as current as nba_api's docs. Widen it by
+        # the enumerated columns NBA is observed to serve but upstream has not
+        # documented; anything beyond that delta is still additive drift.
+        try:
+            headers = admitted_result_set_columns(
+                contract.runtime_class_name,
+                name,
+                headers,
+                frozenset(observed_by_name.get(name, ())),
+            )
+        except ValueError as exc:
+            raise ResponseContractError(
+                "locally admitted provider columns are stale against the pinned contract"
+            ) from exc
         expected.append((name, headers))
     if not expected:
         raise ResponseContractError("pinned nbadb contract declares no result sets")
@@ -2105,7 +2127,7 @@ def _parse_stats_packets(
         if contract.parser_kind == "custom_nested"
         else _legacy_data_sets(payload)
     )
-    expected = _expected_result_sets(contract, endpoint_slug)
+    expected = _expected_result_sets(contract, endpoint_slug, provider_sets)
     try:
         packets, receipts = _strict_stats_packets(provider_sets, expected)
     except ResponseContractError as strict_error:
@@ -3503,7 +3525,7 @@ def rederive_raw_authority_stats_fallback(
         if contract.parser_kind == "custom_nested"
         else _legacy_data_sets(payload)
     )
-    expected = _expected_result_sets(contract, contract.endpoint_slug)
+    expected = _expected_result_sets(contract, contract.endpoint_slug, provider_sets)
     reasons, per_set_reasons = _result_set_fallback_anomalies(provider_sets, expected)
     if not reasons:
         try:
@@ -3673,7 +3695,7 @@ def rederive_raw_authority_stats_wide_rows(
         if contract.parser_kind == "custom_nested"
         else _legacy_data_sets(payload)
     )
-    expected = _expected_result_sets(contract, contract.endpoint_slug)
+    expected = _expected_result_sets(contract, contract.endpoint_slug, provider_sets)
     packets = _safe_known_packets_during_fallback(provider_sets, expected)
     if packets and len(packets) != len(expected):
         raise ResponseContractError("stats raw wide projection is only partially admitted")
@@ -3709,7 +3731,7 @@ def rederive_raw_authority_stats_rows(
         if contract.parser_kind == "custom_nested"
         else _legacy_data_sets(payload)
     )
-    expected = _expected_result_sets(contract, contract.endpoint_slug)
+    expected = _expected_result_sets(contract, contract.endpoint_slug, provider_sets)
     packets, receipts = _strict_stats_packets(provider_sets, expected)
     derived = _raw_authority_stats_rows_from_packets(provider_sets, packets)
     if tuple(item.result_set for item in derived) != receipts:
@@ -3766,7 +3788,7 @@ def rederive_raw_authority_result_sets(
             if contract.parser_kind == "custom_nested"
             else _legacy_data_sets(payload)
         )
-        expected = _expected_result_sets(contract, contract.endpoint_slug)
+        expected = _expected_result_sets(contract, contract.endpoint_slug, provider_sets)
         reasons, per_set_reasons = _result_set_fallback_anomalies(provider_sets, expected)
         if not reasons:
             try:

@@ -633,3 +633,35 @@
         column-level pin cannot express.
   - [ ] Verify the fixture-based sweep against real lane behaviour once `extract` runs;
         27 drifting is an upper bound and at least one hit was parameter-sensitive.
+
+### [2026-09-19 22:15] Extract reached; two stacked workflow defects fixed
+- Mode: enrich
+- Summary: The chain reached `extract` for the first time. All 256 lanes died in `Set up
+  job` on a 39-character `download-artifact` SHA pin; fixing that exposed `lane_control`
+  calling `resume` without its required `--operation-authority-path`, which would have
+  stopped the chain even with a green extract.
+- `raw`: none
+- `wiki`: `wiki/operations/full-extraction-requirements.md` (new section on the two
+  workflow defects; corrected the earlier completeness-vs-liveness claim; three
+  provenance rows)
+- `indexes`: unchanged
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged
+- `provenance`: run `35484551473` extract and lane_control logs, a repo-wide `uses:` SHA
+  length audit, and `full_extraction_control.py:9764`
+- `derived output`: none
+- `vault`: unchanged
+- Companion source change: `.github/workflows/full-extraction.yml` (`a3d2cc5` pin repair,
+  `53b6f2e` operation-authority argument).
+- `link/backlink impact`: none
+- Risks / rollback: both changes are single-purpose and revert independently.
+- Correction: an earlier entry claimed drift costs completeness rather than liveness,
+  reasoning that downstream jobs run on `always()`. They do start on `always()`, but also
+  require `needs.lane_control.result == 'success'`, and `lane_control` failing skipped
+  `checkpoint`, `merge` and `dispatch_next`. The blast radius of a *partial* lane failure
+  remains unmeasured.
+- Follow-up:
+  - [ ] Measure whether `lane_control` tolerates partial lane failure; run `35484551473`
+        failed 256/256 and so cannot distinguish that from an all-green requirement.
+  - [ ] Consider a CI guard asserting every `uses:` SHA pin is exactly 40 hex characters.

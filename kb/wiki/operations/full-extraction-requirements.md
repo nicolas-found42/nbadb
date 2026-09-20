@@ -360,14 +360,57 @@ than on `extract` succeeding. Lanes carry `failure_streak`, `class_failure_strea
 run `35476517060` held 1,624 lanes across 7 planned waves with
 `suggested_remaining_wave_count: 1119`.
 
-So a drifting endpoint does **not** halt the build. It fails its own lanes, accumulates a
-failure streak and is deferred while every other lane proceeds. The cost is that its
-modeled table stays empty while its raw bytes land as `lossless_drift`. Treat remaining
-drift as a completeness question, not a liveness one; in particular, the `removed_header`
-authority decision below does not have to be settled before a first warehouse exists.
+That much is established. What is **not** established is whether a drifting endpoint can
+halt the chain. `checkpoint`, `merge` and `dispatch_next` start on `always()` but their
+`if:` also requires `needs.lane_control.result == 'success'`, and in run `35484551473`
+`lane_control` failed and all three were skipped. So the chain can stop.
+
+That run failed 256 of 256 lanes, so it cannot distinguish "lane_control demands every
+lane green" from "lane_control tolerates partial failure and only this total failure
+broke it" -- and its failure had a separate cause anyway (a missing CLI argument, below).
+Until a run completes with *some* lanes failing and others succeeding, treat the blast
+radius of endpoint drift as unknown rather than assuming it only costs completeness.
 
 Note also that `publish` is hard-disabled (`if: ${{ false && ... }}`), so no chain
 publishes until that is deliberately enabled.
+
+### Two stacked workflow defects that blocked extract entirely
+
+Neither of these was an extraction problem; both were workflow-definition bugs, and the
+first hid the second.
+
+**A truncated action SHA pin.** Every one of the 256 extract lanes in run `35484551473`
+died in `Set up job`:
+
+```
+Unable to resolve action actions/download-artifact@3e5f45b2cfb9172054b408a40e8e0b5a5461e7c
+```
+
+That pin is 39 hex characters; a commit SHA is 40. The "Download exact current-run
+raw-request authority" step had lost a single `7` from `...54b4087a40e8e...`. The other
+nineteen `download-artifact` pins in the workflow already carried the correct SHA. An
+audit of every `uses:` SHA across `.github/workflows` and `.github/actions` found this as
+the only non-40-character pin, so a length check over that set is a cheap guard worth
+keeping in mind.
+
+**A missing required CLI argument in `lane_control`.** With the lanes failing fast,
+`lane_control` ran for the first time and failed:
+
+```
+full_extraction_control.py resume: error: the following arguments are required:
+--operation-authority-path
+```
+
+The `resume` subparser declares it required and the "Prepare next manifest" step never
+passed it. `lane_control` runs on `always()` and gates `checkpoint`, `merge` and
+`dispatch_next`, so this would have stopped the chain even with a fully green `extract`.
+The plan job already uploads `operation-authority.json` beside `manifest.json` in the
+artifact `lane_control` downloads, so the step now resolves it exactly as it already
+resolves the manifest.
+
+Worth noting for future diagnosis: reaching a new gate can expose a defect that was
+previously unreachable rather than newly introduced. Both of these had been latent behind
+`preflight`.
 
 ### Endpoint drift beyond discovery: the extract lanes
 
@@ -484,3 +527,6 @@ season-phase candidate digests were unchanged.
 | shot-location endpoints need the `_fallback_headers` composite projection | `src/nbadb/extract/nba_api_adapter.py` (`_fallback_headers`), two-level `headers` objects observed 2026-09-19 | method note; a naive flatten yields duplicate FGM/FGA and is wrong |
 | `player_info.py`/`team_info.py` are frozen by the implicit-competition source authority | `src/nbadb/contracts/nba_api_implicit_competition_current_source_v1_11_4.json` (13 `source_bindings`); `implicit_competition_source_authority.py` writer requires three independent roots | governed artifact; editing a bound file fails 128 tests |
 | `publish` is hard-disabled | `.github/workflows/full-extraction.yml:5441` (`if: ${{ false && ... }}`) | line-anchored, read 2026-09-19 |
+| truncated `download-artifact` pin killed all 256 extract lanes | run `35484551473` extract job logs (`Set up job`); `.github/workflows/full-extraction.yml` pin audit, 2026-09-19 | fixed in `a3d2cc5`; all twenty pins now identical |
+| `lane_control` resume missing `--operation-authority-path` | run `35484551473` lane_control log; `src/nbadb/orchestrate/full_extraction_control.py:9764` (`required=True`) | fixed in `53b6f2e`; line-anchored |
+| `checkpoint`/`merge`/`dispatch_next` skip when `lane_control` fails | run `35484551473` job outcomes; their `if:` requires `needs.lane_control.result == 'success'` | dated runtime observation; blast radius of partial lane failure still unknown |

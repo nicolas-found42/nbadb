@@ -664,4 +664,6 @@
 - Follow-up:
   - [ ] Measure whether `lane_control` tolerates partial lane failure; run `35484551473`
         failed 256/256 and so cannot distinguish that from an all-green requirement.
-  - [ ] Consider a CI guard asserting every `uses:` SHA pin is exactly 40 hex characters.
+  - [x] CI guard added: `test_every_action_sha_pin_is_a_full_forty_character_commit`
+        covers every `uses:` pin under `.github/workflows` and `.github/actions`.
+        Verified red-capable by reintroducing the exact typo.

@@ -10472,3 +10472,42 @@ def test_discovery_restore_rejects_ambiguous_or_unsafe_layouts(
 
     assert result.returncode == 1
     assert message in result.stdout
+
+
+def test_every_action_sha_pin_is_a_full_forty_character_commit() -> None:
+    """A short pin is unresolvable, and GitHub only says so at job setup time.
+
+    Run 35484551473 lost all 256 extract lanes to a single dropped character:
+    actions/download-artifact was pinned to 39 hex digits, so every lane died in
+    "Set up job" before running any code, while the other nineteen pins of the
+    same action were correct. Length is the whole defect, and it is cheap to
+    assert across every workflow and composite action in the repo.
+    """
+    pin_pattern = re.compile(r"uses:\s*([A-Za-z0-9._/-]+)@([0-9a-f]{6,})\b")
+    roots = (
+        _REPO_ROOT / ".github" / "workflows",
+        _REPO_ROOT / ".github" / "actions",
+    )
+
+    short_pins: list[str] = []
+    checked = 0
+    for root in roots:
+        for path in sorted(root.rglob("*.yml")):
+            for line_number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                match = pin_pattern.search(line)
+                if match is None:
+                    continue
+                checked += 1
+                action, sha = match.group(1), match.group(2)
+                if len(sha) != 40:
+                    short_pins.append(
+                        f"{path.relative_to(_REPO_ROOT)}:{line_number} {action}@{sha} "
+                        f"({len(sha)} chars)"
+                    )
+
+    assert checked > 0, "found no SHA-pinned actions to check"
+    assert not short_pins, "action SHA pins must be exactly 40 hex characters: " + "; ".join(
+        short_pins
+    )

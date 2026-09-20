@@ -83,6 +83,21 @@ _ADMITTED: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "LeagueDashLineups": {
         "Lineups": ("SUM_TIME_PLAYED",),
     },
+    "LeagueDashPlayerShotLocations": {
+        "ShotLocations": (
+            "NICKNAME",
+            "corner_3_fgm",
+            "corner_3_fga",
+            "corner_3_fg_pct",
+        ),
+    },
+    "LeagueDashTeamShotLocations": {
+        "ShotLocations": (
+            "corner_3_fgm",
+            "corner_3_fga",
+            "corner_3_fg_pct",
+        ),
+    },
     "LeagueLeaders": {
         "LeagueLeaders": ("TEAM_ID",),
     },

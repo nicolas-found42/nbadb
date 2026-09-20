@@ -602,5 +602,34 @@
         were removed so behaviour is unchanged rather than worse.
   - [ ] 16 endpoints in `extract` waves 2-5 drift with `removed_header`, which an
         additive-only pin cannot express. Needs its own authority decision.
-  - [ ] The two shot-location endpoints drift but use two-level headers; they need
-        analysis through `structured_data_set_columns`, not a naive header diff.
+  - [x] The two shot-location endpoints: resolved. They are ordinary additive drift
+        (`corner_3_fgm/fga/fg_pct`, plus `NICKNAME` on the player variant); the earlier
+        "needs separate analysis" reading was a measurement error from a naive header
+        flatten. Both are now pinned.
+
+### [2026-09-19 21:25] Extract-phase drift survey and scope correction
+- Mode: enrich
+- Summary: Swept the 101 ID-requiring endpoints the first survey could not reach, pinned
+  the two shot-location endpoints after correcting a measurement error, and established
+  that remaining drift costs completeness rather than pipeline liveness.
+- `raw`: none
+- `wiki`: `wiki/operations/full-extraction-requirements.md` (two new sections: what the
+  remaining drift costs, and the extract-lane drift inventory; seven provenance rows)
+- `indexes`: unchanged
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged
+- `provenance`: 101-endpoint live sweep, lane manifest of run `35476517060`, workflow
+  job-gating lines, and live-vs-pinned header diffs for the named endpoints
+- `derived output`: none
+- `vault`: unchanged
+- Companion source change: `src/nbadb/core/nba_api_observed_columns.py` (shot-location
+  entries; 13 endpoints pinned in total).
+- `link/backlink impact`: none
+- Risks / rollback: the two new pin entries revert independently; they are additive-only
+  and optional, so removing them restores the prior zero-width behaviour.
+- Follow-up:
+  - [ ] `team_details` needs whole-result-set admission (`TeamAwardsCommCup`), which the
+        column-level pin cannot express.
+  - [ ] Verify the fixture-based sweep against real lane behaviour once `extract` runs;
+        27 drifting is an upper bound and at least one hit was parameter-sensitive.

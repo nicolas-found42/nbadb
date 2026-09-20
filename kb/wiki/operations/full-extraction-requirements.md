@@ -351,6 +351,71 @@ generated contract catches up.
 After the pin, a re-run of the same 24-endpoint sweep reports zero drifting responses
 across 36 calls, down from nine.
 
+### What the remaining drift actually costs: completeness, not liveness
+
+`extract` runs its lane matrix with `fail-fast: false`, and every downstream job
+(`checkpoint`, `merge`, `dispatch_next`) is gated on `always() && !cancelled()` rather
+than on `extract` succeeding. Lanes carry `failure_streak`, `class_failure_streak` and
+`next_eligible_iteration`, and `dispatch_next` chains further iterations -- the plan for
+run `35476517060` held 1,624 lanes across 7 planned waves with
+`suggested_remaining_wave_count: 1119`.
+
+So a drifting endpoint does **not** halt the build. It fails its own lanes, accumulates a
+failure streak and is deferred while every other lane proceeds. The cost is that its
+modeled table stays empty while its raw bytes land as `lossless_drift`. Treat remaining
+drift as a completeness question, not a liveness one; in particular, the `removed_header`
+authority decision below does not have to be settled before a first warehouse exists.
+
+Note also that `publish` is hard-disabled (`if: ${{ false && ... }}`), so no chain
+publishes until that is deliberately enabled.
+
+### Endpoint drift beyond discovery: the extract lanes
+
+A second sweep covered the 101 registered endpoints that need IDs, which the first sweep
+could not reach (fixtures: one player, one team, one game, season 2024-25). Result: 56
+clean, 27 drifting, 18 error, 5 unreachable. **27 is an upper bound** -- `LeagueStandings`
+was clean on a direct call, so some hits are parameter-sensitive rather than genuine.
+
+Split by whether the additive-only observation pin can express them:
+
+- **Pinnable, and now pinned.** `box_score_traditional_v2` (`NICKNAME`),
+  `team_info_common`*, `common_player_info`*, `league_dash_lineups` and
+  `team_dash_lineups` (`SUM_TIME_PLAYED`), `league_leaders` (`TEAM_ID`),
+  `team_game_logs` (`AVAILABLE_FLAG`), `team_player_dashboard`, `league_lineup_viz`
+  (`SUM_TM_MIN`), and both shot-location endpoints (`corner_3_fgm/fga/fg_pct`, plus
+  `NICKNAME` on the player variant -- NBA added a "Corner 3" category).
+- **Not expressible by a column-level pin.** `team_details` gained an entire new result
+  set, `TeamAwardsCommCup` (the Emirates NBA Cup, introduced 2023-24); nothing was
+  removed. Admitting a whole result set is a different mechanism from admitting columns
+  within known ones.
+- **Removals, 16 endpoints in waves 2-5.** `league_dash_team_stats` no longer sends
+  `CFID`/`CFPARAMS`; `playoff_picture` dropped 35 COVID-era `ReturnToPlay_*` and
+  `Seeding_Game_*` fields. A removal means the pinned contract requires a column the
+  provider has stopped sending, which an additive-only pin cannot express by design.
+  Deciding to admit a removal means accepting that a modeled column is simply gone, so it
+  needs its own authority decision.
+
+\* `team_info_common` and `common_player_info` are **not** pinned, despite being
+pinnable. Both carry an older, separate defect: their pinned contracts sort a one-column
+`AvailableSeasons` result set to canonical index 0, and `_from_nba_api` returns
+`converted[0]`, so raw schema validation sees a one-column frame. Drift had been masking
+this behind an empty frame; admitting their columns converts a silent empty into a hard
+`ValidationError`, which is worse. The fix -- naming the wanted result set -- is small and
+verified working locally (`team_info_common` returns 17 columns, `common_player_info` 34),
+but it must edit `extract/stats/player_info.py` and `extract/stats/team_info.py`, both
+frozen by the implicit-competition source authority
+(`src/nbadb/contracts/nba_api_implicit_competition_current_source_v1_11_4.json`, 13 bound
+files). Re-issuing that authority needs three independent derivation roots, an author role
+and a predecessor receipt, so it is a governed action rather than a mechanical rebind.
+Editing those files without re-issuing it fails 128 tests. Their pin entries were removed
+so behaviour is unchanged rather than worse.
+
+A measurement caveat worth keeping: the shot-location endpoints first looked unanalysable
+because a naive header flatten produced duplicate `FGM`/`FGA` entries. Those endpoints use
+two-level headers; the adapter's own `_fallback_headers` projects them to composite
+snake_case names (`corner_3_fgm`). Diff against that projection, not against the raw
+`headers` array.
+
 ### Rebinding the star semantic corpora after any source change
 
 Changing bound bytes under `src/nbadb/` invalidates the star semantic decision corpora,
@@ -412,3 +477,10 @@ season-phase candidate digests were unchanged.
 | `FP_HIGH_SCORE`/`FP_HIGH_SCORE_RANK` are current-season-only on `PlayerGameLogs` | live calls for 2005-06, 2015-16, 2024-25, 2025-26, 2026-09-19 | dated runtime observation; motivates optional-not-required admission |
 | `discovery_seed` depends on `player_game_logs` and falls back to `player_index` | `src/nbadb/orchestrate/discovery.py:1399, 1240`; run `35476517060` job log | line-anchored, read 2026-09-19 |
 | post-pin sweep: 36 calls, zero drift | live sweep 2026-09-19 after the pin | dated runtime observation; rerun to refresh |
+| extract lanes tolerate lane failure; downstream jobs run on `always()` | `.github/workflows/full-extraction.yml:3088-3091` (`fail-fast: false`), job `if:` guards for `checkpoint`/`merge`/`dispatch_next`; lane manifest of run `35476517060` (1,624 lanes, 7 waves) | line-anchored, read 2026-09-19 |
+| ID-requiring endpoint sweep: 101 attempted, 27 drifting (upper bound) | live sweep 2026-09-19 with one player/team/game fixture, season 2024-25 | dated runtime observation; parameter-sensitive hits inflate the count |
+| `team_details` gained the `TeamAwardsCommCup` result set | live call vs `pinned_endpoint_contract(TeamDetails)`, 2026-09-19 | dated runtime observation; additive_result_set, not a column change |
+| `league_dash_team_stats` lost `CFID`/`CFPARAMS`; `playoff_picture` lost 35 COVID-era fields | live calls vs pinned contracts, 2026-09-19 | dated runtime observation; genuine provider removals |
+| shot-location endpoints need the `_fallback_headers` composite projection | `src/nbadb/extract/nba_api_adapter.py` (`_fallback_headers`), two-level `headers` objects observed 2026-09-19 | method note; a naive flatten yields duplicate FGM/FGA and is wrong |
+| `player_info.py`/`team_info.py` are frozen by the implicit-competition source authority | `src/nbadb/contracts/nba_api_implicit_competition_current_source_v1_11_4.json` (13 `source_bindings`); `implicit_competition_source_authority.py` writer requires three independent roots | governed artifact; editing a bound file fails 128 tests |
+| `publish` is hard-disabled | `.github/workflows/full-extraction.yml:5441` (`if: ${{ false && ... }}`) | line-anchored, read 2026-09-19 |

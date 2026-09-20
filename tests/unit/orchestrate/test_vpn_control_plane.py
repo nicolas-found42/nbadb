@@ -1769,3 +1769,81 @@ def test_deferred_metadata_rejects_missing_or_invalid_provenance(module) -> None
     invalid_boolean["RESTORE_USABLE"] = "yes"
     with pytest.raises(module.InputValidationError, match="true or false"):
         module.build_deferred_metadata(invalid_boolean)
+
+
+def test_capacity_wait_retries_an_inconsistent_artifact_snapshot(module) -> None:
+    """A listing that disagrees with its own count means "ask again", not "fail".
+
+    Every lane uploads its marker into the run this barrier polls, so GitHub can
+    return a page whose artifacts array and total_count came from different
+    snapshots. Slot 0 of run 35482387144 died on exactly that while the other
+    five slots connected fine.
+    """
+    clock = FakeClock()
+    marker_zero = module.capacity_marker_artifact_name(15, 2, 0)
+    steps: list[object] = [
+        module.ArtifactInventorySnapshotError("returned more artifacts than total_count"),
+        [_artifact(marker_zero, artifact_id=10)],
+    ]
+
+    def artifact_lister() -> list[object]:
+        step = steps.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+    found = module.wait_for_capacity_markers(
+        run_id=15,
+        run_attempt=2,
+        expected=1,
+        artifact_lister=artifact_lister,
+        timeout_seconds=5,
+        poll_interval_seconds=1,
+        clock=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert found[0]["name"] == marker_zero
+    assert clock.sleeps == [1.0]
+    assert steps == []
+
+
+def test_capacity_wait_still_aborts_on_a_non_snapshot_api_error(module) -> None:
+    """A credential or repository fault must fail fast, not burn the timeout."""
+    clock = FakeClock()
+
+    def artifact_lister() -> list[object]:
+        raise module.GitHubApiError("bad credentials")
+
+    with pytest.raises(module.GitHubApiError, match="bad credentials"):
+        module.wait_for_capacity_markers(
+            run_id=15,
+            run_attempt=2,
+            expected=1,
+            artifact_lister=artifact_lister,
+            timeout_seconds=5,
+            poll_interval_seconds=1,
+            clock=clock.monotonic,
+            sleep=clock.sleep,
+        )
+
+    assert clock.sleeps == []
+
+
+def test_inconsistent_single_page_listing_raises_the_snapshot_error(module) -> None:
+    """The inconsistency must carry the retryable type, not a bare GitHubApiError."""
+    payload = {
+        "total_count": 1,
+        "artifacts": [
+            {"id": 10, "name": "a", "expired": False},
+            {"id": 11, "name": "b", "expired": False},
+        ],
+    }
+
+    with pytest.raises(module.ArtifactInventorySnapshotError):
+        module.list_workflow_run_artifacts(
+            repository="owner/repo",
+            run_id="987654",
+            env={"GH_TOKEN": "token-value"},
+            opener=FakeOpener([FakeResponse(payload)]),
+        )

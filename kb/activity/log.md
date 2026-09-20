@@ -568,3 +568,39 @@
         upstream has caught up with; the guard test fails if one goes stale.
   - [ ] Consider upstreaming the missing endpoint docs to `swar/nba_api` so the pin can
         eventually be retired.
+
+### [2026-09-19 20:55] vpn_capacity barrier + nine more observed-column pins
+- Mode: enrich
+- Summary: `discovery_seed` passed for the first time; `vpn_capacity` slot 0 then died on a
+  transient GitHub artifact-listing inconsistency, which the barrier treated as fatal.
+  Made that one condition retryable, and extended the observed-column pin to nine more
+  endpoints that `extract` reaches in waves 0-3.
+- `raw`: none
+- `wiki`: pending (note update deferred to the next batch)
+- `indexes`: unchanged
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged
+- `provenance`: run `35482387144` (preflight and discovery_seed green; vpn_capacity slot 0
+  log), lane manifest wave analysis, and a 101-endpoint ID-requiring drift sweep
+- `derived output`: none
+- `vault`: unchanged
+- Companion source change: `.github/scripts/vpn_control_plane.py` (new
+  `ArtifactInventorySnapshotError`, retried inside `wait_for_capacity_markers` only),
+  `src/nbadb/core/nba_api_observed_columns.py` (nine endpoints added),
+  `tests/unit/orchestrate/test_vpn_control_plane.py` (three tests).
+- Risks / rollback: reverting the barrier change restores fail-on-inconsistency, which is
+  a coin-flip per run. The retry keeps the same 780s timeout and the same final assertion,
+  and a non-snapshot GitHubApiError still aborts immediately.
+- Follow-up:
+  - [ ] `common_player_info` and `team_info_common` are broken two ways and were left
+        alone: their pinned result sets sort `AvailableSeasons` to canonical index 0, so
+        `_from_nba_api` validates a one-column frame. Fixing it means editing
+        `extract/stats/player_info.py` and `extract/stats/team_info.py`, which are frozen
+        by the implicit-competition source authority and need a governed re-issue
+        (three independent roots, author role, predecessor receipt). Their pin entries
+        were removed so behaviour is unchanged rather than worse.
+  - [ ] 16 endpoints in `extract` waves 2-5 drift with `removed_header`, which an
+        additive-only pin cannot express. Needs its own authority decision.
+  - [ ] The two shot-location endpoints drift but use two-level headers; they need
+        analysis through `structured_data_set_columns`, not a naive header diff.

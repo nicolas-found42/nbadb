@@ -66,6 +66,17 @@ class GitHubApiError(VpnControlPlaneError):
     """Raised when GitHub cannot provide a trustworthy artifact inventory."""
 
 
+class ArtifactInventorySnapshotError(GitHubApiError):
+    """Raised when one artifact listing is internally inconsistent.
+
+    GitHub computes ``total_count`` and the ``artifacts`` array from separate
+    snapshots, so a run whose jobs are uploading concurrently can return a page
+    that disagrees with its own count. That says nothing about credentials or
+    the run -- the next poll usually agrees -- so pollers retry this rather than
+    failing, while one-shot callers still surface it as a GitHubApiError.
+    """
+
+
 class ArtifactAmbiguityError(VpnControlPlaneError):
     """Raised when an exact artifact name has multiple live matches."""
 
@@ -468,10 +479,14 @@ def list_workflow_run_artifacts(
         if expected_total is None:
             expected_total = total_count
         elif expected_total != total_count:
-            raise GitHubApiError("GitHub artifact API total_count changed during pagination")
+            raise ArtifactInventorySnapshotError(
+                "GitHub artifact API total_count changed during pagination"
+            )
         inventory.extend(artifacts)
         if len(inventory) > total_count:
-            raise GitHubApiError("GitHub artifact API returned more artifacts than total_count")
+            raise ArtifactInventorySnapshotError(
+                "GitHub artifact API returned more artifacts than total_count"
+            )
         if len(inventory) == total_count:
             return inventory
         if not artifacts:
@@ -958,7 +973,15 @@ def wait_for_capacity_markers(
         return {}
 
     def check() -> dict[int, dict[str, Any]] | None:
-        inventory = artifact_lister()
+        try:
+            inventory = artifact_lister()
+        except ArtifactInventorySnapshotError:
+            # Every lane uploads its marker into this same run, so the listing
+            # this barrier polls is being mutated while it reads. An inconsistent
+            # snapshot means "ask again", not "give up": the enclosing timeout
+            # still bounds the wait, and a real API or credential fault raises a
+            # plain GitHubApiError, which still aborts immediately.
+            return None
         found: dict[int, dict[str, Any]] = {}
         for index, name in expected_names.items():
             artifact = exact_unexpired_artifact(inventory, name)

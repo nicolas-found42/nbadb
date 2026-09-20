@@ -74,8 +74,20 @@ _ADMITTED: Final[dict[str, dict[str, tuple[str, ...]]]] = {
         "STLLeaders": ("IS_ACTIVE_FLAG",),
         "TOVLeaders": ("IS_ACTIVE_FLAG",),
     },
+    "BoxScoreTraditionalV2": {
+        "PlayerStats": ("NICKNAME",),
+    },
     "DraftHistory": {
         "DraftHistory": ("PLAYER_PROFILE_FLAG",),
+    },
+    "LeagueDashLineups": {
+        "Lineups": ("SUM_TIME_PLAYED",),
+    },
+    "LeagueLeaders": {
+        "LeagueLeaders": ("TEAM_ID",),
+    },
+    "LeagueLineupViz": {
+        "LeagueLineupViz": ("SUM_TM_MIN",),
     },
     "PlayerGameLogs": {
         "PlayerGameLogs": (
@@ -91,6 +103,22 @@ _ADMITTED: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     },
     "PlayerIndex": {
         "PlayerIndex": ("SUPPLEMENTAL_STATUS",),
+    },
+    "TeamDashLineups": {
+        "Lineups": ("SUM_TIME_PLAYED",),
+    },
+    "TeamGameLogs": {
+        "TeamGameLogs": ("AVAILABLE_FLAG",),
+    },
+    "TeamPlayerDashboard": {
+        "PlayersSeasonTotals": (
+            "NICKNAME",
+            "WNBA_FANTASY_PTS",
+            "FP_HIGH_SCORE",
+            "WNBA_FANTASY_PTS_RANK",
+            "FP_HIGH_SCORE_RANK",
+            "TEAM_COUNT",
+        ),
     },
 }
 

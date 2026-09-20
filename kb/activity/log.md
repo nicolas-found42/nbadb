@@ -667,3 +667,49 @@
   - [x] CI guard added: `test_every_action_sha_pin_is_a_full_forty_character_commit`
         covers every `uses:` pin under `.github/workflows` and `.github/actions`.
         Verified red-capable by reintroducing the exact typo.
+
+### [2026-09-20 01:10] MODEL-GREEN review surface mapped; the gate cannot open
+- Mode: enrich
+- Summary: Mapped what MODEL-GREEN actually demands instead of treating 141,681 as a
+  backlog. `model_green` is unconditionally `False`: `_model_blockers` ends with an
+  unconditional `blockers.extend` of two `not-generated` receipt rows, and
+  `model_green = not blockers and ...`. No generator input can clear them. Of the 47
+  blocker categories, 98.8% of occurrences come from four compilers that take no
+  arguments and hardcode `reviewed=False` — `metric_use_case_contract._validate_metric`
+  goes further and *raises* if a semantic field is reviewed, so the blockers are asserted
+  as an invariant. The two authorities that do accept authored input are called with
+  literal empty tuples, and the authored decision corpus in the repo is read only by the
+  rebind script, never by the generator. 1,130 occurrences require an independent second
+  party by design. Two more need observations of extracted data, which this gate blocks.
+- `raw`: none
+- `wiki`: `wiki/operations/full-extraction-requirements.md` (new terminal-gate section:
+  unreachability proof, subject-count decomposition, three blocker classes, the
+  single worked example, two circularities, ordered path; ten provenance rows)
+- `indexes`: `indexes/coverage.md` (refreshed the requirements-note row)
+- `schema`: unchanged
+- `config`: unchanged
+- `canonical material`: unchanged
+- `provenance`: run `35487068911` lane metadata and jobs `106017368499` /
+  `106017858630`; a local `nbadb contract-assurance` run of 2026-09-20 whose blocker set
+  is identical to that run's manifest; an AST walk over `assurance.py:_model_blockers`;
+  line-anchored reads of `field_fate_contract.py`, `metric_use_case_contract.py`,
+  `star_table_contract.py`, `temporal_availability_contract.py`,
+  `stable_model_disposition.py`, `review_evidence.py`, `raw_request_assurance.py`
+- `derived output`: none
+- `vault`: unchanged
+- Companion source change: none. Nothing was modified; this batch is diagnosis only.
+- `link/backlink impact`: none
+- Risks / rollback: documentation only.
+- Open design question: `nbadb contract-assurance` documents itself as a MODEL
+  diagnostic and says no workflow may treat its status as DATA authority, yet
+  `raw_request_assurance.py:311` makes `model_green` a hard precondition for every
+  extract lane. Whether that gate belongs there is unresolved and untouched.
+- Follow-up:
+  - [ ] Decide whether `extract` must require MODEL-GREEN at all. Cheapest lever by a
+        wide margin; every other path is blocked behind it.
+  - [ ] If the gate stays: build admission seams for field-fate, metric-use-case,
+        star-table and temporal-availability before any authoring can begin.
+  - [ ] Wire the existing seam — load the decision corpora in the assurance generator
+        rather than passing `semantic_contracts=()` / `review_receipts=()`.
+  - [ ] Source independent review receipts; the author of a decision cannot supply its
+        receipt, so this needs a second identity whoever does the work.

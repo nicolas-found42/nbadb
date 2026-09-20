@@ -510,6 +510,131 @@ maintenance path is the module's own rebind contract
 Not every pin moves. The adapter fix above moved five of seven; the structural and
 season-phase candidate digests were unchanged.
 
+## Terminal gate: MODEL-GREEN is unreachable by authoring (2026-09-20)
+
+Every extract lane now reaches the runner and dies in the same place. `raw_request_assurance.py:311`
+refuses to compile the raw-request authority unless `generation.model_green` is true:
+
+```
+RawRequestAssuranceError: raw-request assurance generation is not exact MODEL-GREEN evidence
+```
+
+Both completed lanes of run `35487068911` report GitHub `success` while carrying
+`status: pipeline_failure`, `raw_status: extract-error`, `extract_exit_code: 1`,
+`rows_persisted: 0`. The lane is not failing to reach the provider; it never starts.
+
+### `model_green` is false unconditionally
+
+`_model_blockers` (`src/nbadb/contracts/assurance.py:1878-2040`) ends with an unconditional
+`blockers.extend([...])` that appends `independent_local_test_receipt_not_bound` and
+`independent_review_receipt_not_bound`. An AST walk confirms zero enclosing conditionals: the
+statement is at function-body level. `model_green = not blockers and deterministic_status == "GREEN"`
+(`assurance.py:2453`). Those two rows are always present, so `model_green` is always `False`,
+for every possible input to the generator. The gate cannot open on a locally generated assurance
+no matter what is authored.
+
+### Occurrences are not review decisions
+
+The manifest's 141,681 is an occurrence count over 47 codes. The distinct subjects behind it:
+
+| Authority child | Distinct subjects | Codes | Occurrences |
+|---|---|---:|---:|
+| `field-fate-contract.json` | 11,323 provider fields, 1,445 storage-only sinks, 6 zero-field routes | 11 | 71,544 |
+| `metric-use-case-contract.json` | 4,337 public numeric columns | 15 | 64,677 |
+| `star-table-contract.json` | 261 public tables, 420 FK relations | 14 | 3,369 |
+| `stable-model-disposition.json` | 1,128 model candidates | 1 | 1,128 |
+| `star-semantic-inventory.json` | 261 public tables | 3 | 523 |
+| `temporal-availability-contract.json` | 438 route scopes | 1 | 438 |
+| `not-generated` | 2 generation-level receipts | 2 | 2 |
+
+### Three classes of blocker
+
+**A. No admission seam exists — 139,928 occurrences (98.8%).** Four compilers take no arguments and
+hardcode the unreviewed state:
+
+- `compile_field_fate_contracts()` (`field_fate_contract.py:1086`) takes none; `_compile_field`
+  (`:561`) writes `reviewed=False, green=False` and the four per-field codes as literals. The six
+  `non_green_*` codes are derived name-match evidence from `_non_green_lineage_evidence`.
+- `metric_use_case_registry()` (`metric_use_case_contract.py:756`) takes none, and `_validate_metric`
+  (`:594`) *raises* if any non-formula semantic field is `reviewed` — "metric registry invented
+  reviewed computed semantics". The contract asserts the blockers as an invariant, so authoring a
+  metric review would make validation fail, not pass.
+- `compile_star_table_contracts()` (`star_table_contract.py:821`) takes none; blockers are appended
+  unconditionally at `:743-759`.
+- `TemporalState = Literal["contract_blocked"]` (`temporal_availability_contract.py:36`) is the only
+  inhabitable state, and the bundle compiler consumes no observations.
+
+These are a census of a mechanism that has not been built, not a backlog. Writing the reviews would
+change nothing, because there is nowhere to put them.
+
+**B. A seam exists but is wired to empty — 1,651 occurrences.** `assurance.py:944-962` calls the two
+authoring-capable compilers with literal empty tuples:
+
+```python
+stable_model_disposition = compile_stable_model_disposition_inventory(..., review_receipts=())
+star_semantic_inventory = compile_star_semantic_inventory(
+    ..., semantic_contracts=(), review_receipts=()
+)
+```
+
+`src/nbadb/contracts/data/star-semantic-decisions-v1.json` is an authored corpus that exists in the
+repository and is read only by `rebind_star_semantic_decision_corpora.py`. The assurance generator
+never loads it, so the one authored decision does not reach the manifest.
+
+**C. Structurally requires a second party — 1,130 occurrences.** All 1,128 dispositions are already
+drafted by `draft_required_model_dispositions` (`stable_model_disposition.py:790`), each naming a
+deterministic `pending_independent_model_disposition_review` digest. Its docstring is explicit: the
+drafts are "deliberately not review evidence" and point at "a deterministic absent-review identity so
+the disposition join stays red until a real independent receipt replaces it." `ReviewReceiptV1`
+requires an `IndependenceEvidenceKind` — `independent_agent_review`, `maintainer_review`,
+`protected_environment_approval` or `qualified_external_review`. The author of a decision cannot
+supply its receipt. The two `not-generated` rows are the same requirement at generation scope.
+
+### The precedent is one table
+
+`star-semantic-decisions-v1.json` records `denominator_count: 261`, `decisions: 1`,
+`unreviewed_table_ids: 260`; the dimensions shard records 18 and 1. The single worked example is
+`dim_season_phase`, a three-column literal lookup — the simplest table in the warehouse. It still
+carries one functional dependency, one key group, three lineage edges, three witness digests, purpose
+/ row / temporal policies and six policy selections, each with its own `evidence_sha256`.
+
+### Two circularities
+
+`physical_field_capture_unobserved` (11,323) requires observed physical fields, and
+`availability_unknown_pending_reviewed_evidence` (438) requires observed season intervals — all 438
+scopes are `availability_state: unknown`, `planner_start_basis: fallback_attempt_unverified`. Both
+are observations of extracted data, and extraction is what the gate blocks.
+
+### The gate may be miscited
+
+`nbadb contract-assurance` documents itself as a "MODEL diagnostic, not a DATA gate", and states that
+"no workflow may treat this command's exit status as publication DATA authority"
+(`src/nbadb/cli/commands/contract_assurance.py`). `raw_request_assurance.py:311` nevertheless makes
+`model_green` a hard precondition for every extract lane. Whether extract should require MODEL-GREEN
+at all is an open design question; it is not answered here and nothing was changed.
+
+### Ordered path, cheapest first
+
+1. Decide whether extract must require MODEL-GREEN. Cheapest by far if the answer is no.
+2. Wire the existing seam: load the decision corpora in the generator and produce review receipts.
+   Clears at most 1,651 occurrences and still needs an independent reviewer.
+3. Build admission seams for field-fate, metric-use-case, star-table and temporal-availability. Four
+   compilers need review inputs threaded through, and their validators relaxed from asserting
+   *unreviewed* to accepting *reviewed*. Design and implementation work before any authoring can start.
+4. Only then author: 11,323 fields, 4,337 columns, 261 tables twice over, 420 FK relations, 438 route
+   scopes, 1,128 candidates — against a single worked example.
+5. Resolve the two observation circularities, which need data this gate currently prevents collecting.
+
+### Reproducing this locally
+
+```bash
+uv run nbadb contract-assurance --endpoint-analysis-docs-root <nba_api clone at v1.11.4>
+```
+
+Roughly two minutes, no network. It prints `MODEL-GREEN: RED` and all 47 blocker rows. The local run
+of 2026-09-20 produced a blocker set identical to run `35487068911`'s manifest; only the generation
+semantic digest differs, because it binds the source commit.
+
 ## Related notes
 
 - [[../topics/full-extraction-control-plane|Full Extraction Control Plane]] — what the
@@ -565,3 +690,13 @@ season-phase candidate digests were unchanged.
 | `video_details` returns non-JSON behind HTTP 500 | three direct `nba_api` calls, 2026-09-19 | dated runtime observation; persistent, not transient |
 | `video_details_asset` returns a nested `resultSets` mapping our unknown-response path rejects | direct call (651-entry playlist) vs `src/nbadb/extract/nba_api_adapter.py:1808`; `parser_kind=legacy_result_sets`, `result_sets=[]` | dated runtime observation; `custom_nested` already exists for this shape |
 | the two video endpoints are 312 of 1,624 lanes and sort first in the matrix | lane manifest of run `35476517060` | derived from the manifest; recheck after any replan |
+| MODEL-GREEN blocks every extract lane | run `35487068911`, jobs `106017368499` and `106017858630`; `extraction-lane-metadata-...` (`status: pipeline_failure`, `extract_exit_code: 1`, `rows_persisted: 0`); `src/nbadb/orchestrate/raw_request_assurance.py:311` | line-anchored, read 2026-09-20; both completed lanes identical |
+| `model_green` is unconditionally false | `src/nbadb/contracts/assurance.py:1878-2040` (`_model_blockers`, unconditional trailing `blockers.extend`) and `:2453` (`model_green = not blockers and ...`); AST walk shows no enclosing conditional | static proof, 2026-09-20; holds for every generator input |
+| 141,681 occurrences decompose to far fewer subjects | `assurance-manifest.json` `model_blockers` plus entity counts from `stable-model-disposition.json`, `temporal-availability-contract.json`, `star-semantic-decisions-v1.json` of run `35487068911` | derived from the generated children; recheck after any authority change |
+| four authorities have no admission seam | `field_fate_contract.py:561, 1086`; `metric_use_case_contract.py:594, 756`; `star_table_contract.py:743-759, 821`; `temporal_availability_contract.py:36` | line-anchored, read 2026-09-20; `_validate_metric` rejects reviewed fields outright |
+| the two authoring-capable compilers are wired to empty tuples | `src/nbadb/contracts/assurance.py:944-962` | line-anchored, read 2026-09-20 |
+| the authored decision corpus never reaches the generator | `src/nbadb/contracts/data/star-semantic-decisions-v1.json`; sole importer is `rebind_star_semantic_decision_corpora.py` | repository-wide grep, 2026-09-20 |
+| 1,128 dispositions are drafted; only independent receipts are missing | `stable-model-disposition.json` (`dispositions: 1128`, `review_receipts: 0`); `stable_model_disposition.py:790` docstring; `review_evidence.py` `IndependenceEvidenceKind` | line-anchored; fail-closed by design, not a defect |
+| one of 261 star tables is authored | `star-semantic-decisions-v1.json` (`denominator_count: 261`, `decisions: 1`); dimensions shard 18/1 | counted 2026-09-20; the worked example is `dim_season_phase` |
+| MODEL-GREEN is documented as a diagnostic, not a gate | `src/nbadb/cli/commands/contract_assurance.py` docstring vs `raw_request_assurance.py:311` | open design question; nothing changed |
+| local assurance reproduces the CI blocker set exactly | `uv run nbadb contract-assurance --endpoint-analysis-docs-root <v1.11.4 clone>`, 2026-09-20, vs run `35487068911` manifest | ~2 min, no network; only the generation semantic digest differs |
